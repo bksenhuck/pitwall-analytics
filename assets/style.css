@@ -1,0 +1,15 @@
+/* Minimal styling for Pitwall Analytics */
+body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 0; }
+.container { max-width: 1100px; margin: 0 auto; padding: 16px; }
+.header { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; }
+.brand { font-weight: 700; font-size: 20px; }
+.nav a, .nav .nav-link { margin-left: 12px; text-decoration: none; color: #333; }
+.hero { padding: 24px 0; }
+.cards { display: flex; gap: 12px; }
+.card { background: #f8f9fb; padding: 12px; border-radius: 6px; min-width: 160px; }
+.card-title { font-size: 12px; color: #666; }
+.card-value { font-weight: 600; margin-top: 6px; }
+.filters { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.filter { min-width: 180px; }
+.charts { display: grid; grid-template-columns: 1fr; gap: 16px; }
+.footer { margin-top: 24px; color: #777; font-size: 13px; }

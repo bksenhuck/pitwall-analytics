@@ -1,0 +1,4 @@
+dash>=2.9
+pandas>=2.0
+fastf1>=3.0
+plotly>=5.0

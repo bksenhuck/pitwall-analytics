@@ -1,0 +1,58 @@
+# Configuração para deploy no Render.com
+# https://render.com/docs/blueprint-spec
+
+services:
+  # Web Service - Backend + Frontend Unificado
+  - type: web
+    name: pitwall-analytics
+    env: python
+    region: oregon  # ou outra região próxima
+    plan: free  # starter, standard, pro, etc.
+    
+    # Build
+    buildCommand: pip install -r requirements-new.txt
+    
+    # Start
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    
+    # Environment Variables
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      
+      - key: API_HOST
+        value: 0.0.0.0
+      
+      - key: API_PORT
+        sync: false
+        value: 10000  # Render usa a variável $PORT automaticamente
+      
+      - key: DEBUG
+        value: False
+      
+      - key: CACHE_DIR
+        value: .ff1cache
+      
+      - key: CACHE_ENABLED
+        value: True
+      
+      - key: DB_DIR
+        value: data
+      
+      - key: DB_NAME
+        value: pitwall_cache.db
+      
+      - key: CACHE_TTL_SECONDS
+        value: 3600
+      
+      - key: EXTERNAL_API_TIMEOUT
+        value: 30
+      
+      - key: CORS_ORIGINS
+        value: '["*"]'
+    
+    # Health check
+    healthCheckPath: /api/health
+    
+    # Auto-deploy on push
+    autoDeploy: true

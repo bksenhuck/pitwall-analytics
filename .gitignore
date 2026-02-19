@@ -48,9 +48,16 @@ venv_pitwall_analytics/
 data/
 *.db
 *.db-*
+*.db-journal
+*.db-shm
+*.db-wal
 
 # Dash assets cache (if any cached files)
 assets/*-cache.*
+
+# Render/Heroku
+.render/
+.heroku/
 
 # local env files
 .env

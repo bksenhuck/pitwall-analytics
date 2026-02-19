@@ -1,0 +1,39 @@
+# ===========================================
+# Pitwall Analytics - Dependencies
+# ===========================================
+
+# Backend API Framework (FastAPI)
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0        # ASGI server for FastAPI
+pydantic>=2.0.0                   # Data validation (included with FastAPI)
+python-multipart>=0.0.6           # For form data/file uploads
+
+# Frontend Framework
+dash>=2.9.0
+
+# HTTP Client (async support for external APIs)
+httpx>=0.25.0                     # Async HTTP client (replaces requests in async contexts)
+
+# Data Processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# F1 Data
+fastf1>=3.0.0
+
+# Visualization
+plotly>=5.0.0
+matplotlib>=3.7.0
+
+# Sync HTTP Requests (for frontend)
+requests>=2.31.0
+
+# Environment & Configuration
+python-dotenv>=1.0.0
+
+# Development (optional)
+# pytest>=7.4.0
+# pytest-asyncio>=0.21.0          # For testing async endpoints
+# black>=23.0.0
+# flake8>=6.0.0
+# httpx-mock>=0.10.0              # For mocking async HTTP calls

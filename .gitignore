@@ -44,6 +44,11 @@ venv_pitwall_analytics/
 # FastF1 cache
 .ff1cache/
 
+# SQLite cache database
+data/
+*.db
+*.db-*
+
 # Dash assets cache (if any cached files)
 assets/*-cache.*
 

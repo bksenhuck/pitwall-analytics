@@ -412,16 +412,13 @@ scripts/
   populate_cache.py        # Script de população
 
 data/
-  pitwall_cache.db         # V1 (antigo)
-  pitwall_cache_v2.db      # V2 (novo) ← USAR ESTE!
+  pitwall_cache.db         # Banco SQLite normalizado
 ```
 
 ## Recomendações
 
-✅ **Use V2 para tudo novo**  
 ✅ **Popular cache regularmente**  
 ✅ **Consultar `/available` antes de carregar dados**  
 ✅ **Frontend só mostra o que está em cache**  
 
-❌ **Não misture V1 e V2 no mesmo componente**  
 ❌ **Não assuma que dados existem sem verificar**

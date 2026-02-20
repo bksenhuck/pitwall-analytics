@@ -85,7 +85,7 @@ CONFIGURATION FLOW
    │      ├──► API host/port
    │      └──► Cache settings
    │
-   └──► frontend/config.py
+   └──► Frontend settings (app.py)
           │
           ├──► Dash settings
           ├──► Dash host/port
@@ -98,7 +98,7 @@ DATA FLOW EXAMPLE
 1. User clicks "Load Data" button in Analytics page
                     │
                     ▼
-2. Dash callback triggered (frontend/pages/analytics.py)
+2. Dash callback triggered (pages/analytics.py)
                     │
                     ▼
 3. HTTP GET request to: http://127.0.0.1:5000/api/data/session?season=2023&event=Monaco

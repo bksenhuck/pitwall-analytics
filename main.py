@@ -15,11 +15,6 @@ from fastapi.middleware.wsgi import WSGIMiddleware
 from backend.config import get_config
 import uvicorn
 
-# Importar o Dash app
-import dash
-from dash import html, dcc
-import data_loader
-
 
 def create_production_app() -> FastAPI:
     """
@@ -79,33 +74,28 @@ def create_production_app() -> FastAPI:
     # ==========================================
     # 2. Criar Dash app (Frontend)
     # ==========================================
-    data_loader.enable_cache(".ff1cache")
+    from frontend.api import client
+    client.enable_cache(".ff1cache")
     
-    dash_app = dash.Dash(
-        __name__,
-        use_pages=True,
-        suppress_callback_exceptions=True,
-        requests_pathname_prefix="/"  # Dash na raiz
-    )
+    from frontend.app import create_app as create_dash_app
+    dash_app = create_dash_app()
+    dash_app.config.suppress_callback_exceptions = True
     
-    dash_app.layout = html.Div([
-        # Top navigation
-        html.Header([
-            html.Div("Pitwall Analytics", className="brand"),
-            html.Nav([
-                dcc.Link("Home", href="/", className="nav-link"),
-                dcc.Link("Analytics", href="/analytics", className="nav-link"),
-                dcc.Link("Live", href="/live", className="nav-link"),
-                dcc.Link("API Docs", href="/api/docs", className="nav-link"),
-            ], className="nav"),
-        ], className="header"),
-
-        # page content
-        dash.page_container,
-
-        # small footer
-        html.Footer("© Pitwall Analytics", className="footer"),
-    ], className="container")
+    # Mount Dash app layout
+    dash_app.layout.className = "container"
+    
+    # ==========================================
+    # 3. Mount Dash in FastAPI
+    # ==========================================
+    # ==========================================
+    # 2. Criar Dash app (Frontend)
+    # ==========================================
+    from frontend.api import client
+    client.enable_cache(".ff1cache")
+    
+    from frontend.app import create_app as create_dash_app
+    dash_app = create_dash_app()
+    dash_app.config.suppress_callback_exceptions = True
     
     # ==========================================
     # 3. Montar Dash dentro do FastAPI

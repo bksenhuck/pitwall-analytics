@@ -1,1 +1,1 @@
-"""Components package initialization"""
+"""UI components package"""

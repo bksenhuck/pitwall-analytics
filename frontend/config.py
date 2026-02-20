@@ -1,32 +1,19 @@
-"""
-Frontend configuration.
-Manages settings for Dash application.
-"""
+"""Frontend configuration"""
 import os
-from dotenv import load_dotenv
 from pathlib import Path
 
-# Load environment variables
-basedir = Path(__file__).parent.parent
-load_dotenv(basedir / '.env')
+# Backend API URL - read from environment or default to localhost
+BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://127.0.0.1:5000/api")
 
+# Dash settings
+HOST = os.getenv("DASH_HOST", "127.0.0.1")
+PORT = int(os.getenv("DASH_PORT", "8050"))
+DEBUG = os.getenv("DASH_DEBUG", "True").lower() == "true"
 
-class FrontendConfig:
-    """Frontend Dash configuration"""
-    
-    # Dash settings
-    DEBUG = os.getenv('DASH_DEBUG', 'True').lower() == 'true'
-    HOST = os.getenv('DASH_HOST', '127.0.0.1')
-    PORT = int(os.getenv('DASH_PORT', '8050'))
-    
-    # Backend API settings
-    BACKEND_API_URL = os.getenv('BACKEND_API_URL', 'http://127.0.0.1:5000/api')
-    
-    # App metadata
-    APP_TITLE = os.getenv('APP_TITLE', 'Pitwall Analytics')
-    
-    # Timeout for backend requests (seconds)
-    REQUEST_TIMEOUT = int(os.getenv('REQUEST_TIMEOUT', '30'))
+# Cache settings
+CACHE_DIR = Path(".ff1cache")
+CACHE_ENABLED = True
 
-
-config = FrontendConfig()
+# App metadata
+APP_TITLE = "Pitwall Analytics"
+APP_DESCRIPTION = "F1 Race Analytics Dashboard"

@@ -63,10 +63,9 @@ backend/
 │   └── data.py                     # Cache endpoints: GET /data, POST /refresh
 │
 └── services/
-    ├── cache_service.py            # FastF1 cache (existing)
-    ├── cache_service_v2.py         🆕 TTL cache service
+    ├── cache_service.py            # TTL cache service
     ├── external_api.py             🆕 External API service (httpx)
-    └── f1_data_service.py          # F1 data service (existing)
+    └── f1_data_service.py          # F1 data service
 ```
 
 ---
@@ -111,7 +110,7 @@ CREATE INDEX idx_cached_data_last_updated ON cached_data(last_updated);
                      ▼
 ┌─────────────────────────────────────────────────────────┐
 │                Cache Service (TTL Logic)                │
-│           (services/cache_service_v2.py)                │
+│             (services/cache_service.py)                 │
 │  • Check if cache exists                                │
 │  • Validate TTL (expired?)                              │
 │  • Decide: return cache or fetch fresh                  │
@@ -426,7 +425,7 @@ async def get_data(key: str = Query('f1_seasons')):
 ### Changing TTL per cache key
 
 ```python
-# In cache_service_v2.py or routes
+# In cache_service.py or routes
 cache_service = CacheService(ttl_seconds=7200)  # 2 hours for this key
 ```
 

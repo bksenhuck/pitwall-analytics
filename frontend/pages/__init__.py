@@ -1,1 +1,1 @@
-"""Pages package initialization"""
+"""Pages package"""

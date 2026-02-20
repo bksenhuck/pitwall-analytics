@@ -113,7 +113,7 @@ This structure supports:
 1. Start by moving data processing logic to `backend/services/`
 2. Create API endpoints in `backend/api/`
 3. Update Dash callbacks to call backend APIs instead of direct processing
-4. Move charts to `frontend/components/`
+4. Move charts to `components/`
 5. Refactor pages one at a time
 
 Keep old code running while gradually migrating to new structure.

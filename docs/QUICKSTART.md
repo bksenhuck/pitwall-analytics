@@ -88,22 +88,16 @@ curl "http://127.0.0.1:5000/api/data/session?season=2023&event=Monaco"
 |------|---------|
 | `run.py` | Launch both services |
 | `backend/app.py` | Backend entry point |
-| `frontend/app.py` | Frontend entry point |
+| `app.py` | Frontend entry point |
 | `backend/api/data.py` | API endpoints |
 | `backend/services/f1_data_service.py` | Business logic |
-| `frontend/pages/analytics.py` | Main analytics page |
-| `.env` | Configuration |
-| `requirements.txt` | Dependencies |
-
----
-
-## 🎯 What to Migrate First
+| `pages/analytics.py` | Main analytics page |
 
 1. ✅ **Test new structure** - Run and verify it works
 2. 🔄 **Move data_loader.py functions** to `backend/services/f1_data_service.py`
 3. 🔄 **Create API endpoints** in `backend/api/data.py`
 4. 🔄 **Update one page** (e.g., analytics) to use API
-5. 🔄 **Move charts** to `frontend/components/charts.py`
+5. 🔄 **Move charts** to `components/charts.py`
 6. 🔄 **Repeat** for other pages
 
 ---

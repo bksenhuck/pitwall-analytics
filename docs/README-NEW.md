@@ -251,15 +251,15 @@ def my_business_logic(self):
     return processed_data
 ```
 
-3. **Call from frontend `frontend/pages/analytics.py`**:
+3. **Call from frontend `pages/analytics.py`**:
 ```python
-response = requests.get(f"{config.BACKEND_API_URL}/data/myendpoint")
+response = requests.get(f"{BACKEND_API_URL}/data/myendpoint")
 data = response.json()
 ```
 
 ### Adding a New Page
 
-1. **Create page file in `frontend/pages/mypage.py`**:
+1. **Create page file in `pages/mypage.py`**:
 ```python
 import dash
 from dash import html
@@ -271,7 +271,7 @@ layout = html.Div([
 ])
 ```
 
-2. **Add navigation link in `frontend/app.py`**:
+2. **Add navigation link in `app.py`**:
 ```python
 dcc.Link("My Page", href="/mypage", className="nav-link")
 ```
@@ -299,7 +299,7 @@ Your **current app continues to work**. Migrate piece by piece:
    - Start with simple pages (home), then complex (analytics)
 
 4. **Phase 4**: Move UI components
-   - Extract charts from `charts.py` to `frontend/components/charts.py`
+   - Extract charts from `charts.py` to `components/charts.py`
    - Refactor pages to use new components
 
 5. **Phase 5**: Clean up

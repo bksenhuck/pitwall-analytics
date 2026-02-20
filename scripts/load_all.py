@@ -29,12 +29,17 @@ import time
 class AllDataLoader:
     """Carrega todos os dados disponíveis do FastF1."""
     
+    # API Rate Limiting: FastF1 API has 500 calls/hour limit
+    # Using 10 second delay = 6 calls/min = 360 calls/hour (safe margin)
+    RATE_LIMIT_DELAY = 10  # seconds between API calls
+    
     def __init__(self):
         self.stats = {
             'seasons': 0,
             'events': 0,
             'sessions_loaded': 0,
             'sessions_skipped': 0,
+            'api_calls': 0,
             'errors': []
         }
         self.start_time = time.time()
@@ -234,12 +239,22 @@ class AllDataLoader:
             session = ff1.get_session(season, event_name, session_type)
             session.load(laps=True, telemetry=False, weather=True, messages=True)
             
+            # Track API call
+            self.stats['api_calls'] += 1
+            
             # Salva no banco
             success, message = self.save_session_to_db(session, season, event_name)
             
             if success:
                 print(f" ✅ {message}")
                 self.stats['sessions_loaded'] += 1
+                
+                # Rate limiting: Wait before next API call
+                if self.RATE_LIMIT_DELAY > 0:
+                    print(f"      ⏱️  Aguardando {self.RATE_LIMIT_DELAY}s (rate limit: {self.stats['api_calls']} calls)...", end='', flush=True)
+                    time.sleep(self.RATE_LIMIT_DELAY)
+                    print(" ✓")
+                
                 return True
             else:
                 print(f" ❌ {message}")
@@ -307,6 +322,11 @@ class AllDataLoader:
         print("Este script vai carregar TODOS os dados disponíveis do FastF1.")
         print("Isso pode demorar VÁRIAS HORAS!")
         print()
+        print("⚠️  RATE LIMITING:")
+        print(f"   - A API do F1 tem limite de 500 chamadas/hora")
+        print(f"   - Delay configurado: {self.RATE_LIMIT_DELAY}s entre sessões")
+        print(f"   - Isso permite ~{3600//self.RATE_LIMIT_DELAY} sessões/hora (margem de segurança)")
+        print()
         
         # Inicializa banco
         print("📦 Inicializando banco de dados...")
@@ -341,6 +361,9 @@ class AllDataLoader:
         
         # Estatísticas finais
         elapsed = time.time() - self.start_time
+        rate_limit_time = self.stats['api_calls'] * self.RATE_LIMIT_DELAY
+        actual_work_time = elapsed - rate_limit_time
+        
         print("\n" + "="*80)
         print("🏁 CARREGAMENTO CONCLUÍDO!")
         print("="*80)
@@ -349,7 +372,10 @@ class AllDataLoader:
         print(f"   ✅ Eventos processados: {self.stats['events']}")
         print(f"   ✅ Sessões carregadas: {self.stats['sessions_loaded']}")
         print(f"   ⏭️  Sessões já existentes: {self.stats['sessions_skipped']}")
+        print(f"   📡 API calls realizadas: {self.stats['api_calls']}")
         print(f"   ⏱️  Tempo total: {elapsed/60:.1f} minutos")
+        print(f"   ⏱️  Tempo de rate limiting: {rate_limit_time/60:.1f} minutos")
+        print(f"   ⏱️  Tempo de processamento: {actual_work_time/60:.1f} minutos")
         
         if self.stats['errors']:
             print(f"\n   ⚠️  Erros encontrados: {len(self.stats['errors'])}")

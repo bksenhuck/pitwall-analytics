@@ -12,6 +12,7 @@ import argparse
 import asyncio
 from pathlib import Path
 import sys
+import time
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
@@ -28,6 +29,10 @@ from backend.db.session import get_db_connection, init_database
 class CachePopulator:
     """Populate normalized SQLite cache with F1 data"""
     
+    # API Rate Limiting: FastF1 API has 500 calls/hour limit
+    # Using 10 second delay = 6 calls/min = 360 calls/hour (safe margin)
+    RATE_LIMIT_DELAY = 10  # seconds between API calls
+    
     def __init__(self):
         """Initialize cache populator"""
         # Enable FastF1 cache
@@ -37,6 +42,10 @@ class CachePopulator:
         
         # Initialize database
         init_database()
+        
+        # Track API calls for rate limiting
+        self.api_calls = 0
+        self.last_call_time = None
         
     def populate_season(self, season: int, event_filter: Optional[str] = None):
         """
@@ -191,6 +200,9 @@ class CachePopulator:
                     messages=True
                 )
                 
+                # Track API call and apply rate limiting
+                self.api_calls += 1
+                
                 # Insert session
                 session_id = self._insert_session(event_id, session_type, session)
                 
@@ -214,6 +226,12 @@ class CachePopulator:
                 status_count = self._insert_session_status(session_id, session)
                 
                 print(f"✅ L:{laps_count} R:{results_count} W:{weather_count} M:{messages_count} S:{status_count}")
+                
+                # Rate limiting: Wait before next API call
+                if self.RATE_LIMIT_DELAY > 0:
+                    print(f"      ⏱️  Aguardando {self.RATE_LIMIT_DELAY}s (rate limit: {self.api_calls} calls)...", end='', flush=True)
+                    time.sleep(self.RATE_LIMIT_DELAY)
+                    print(" ✓")
                 
             except Exception as e:
                 print(f"⚠️  {str(e)[:50]}")

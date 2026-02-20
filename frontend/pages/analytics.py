@@ -1,190 +1,191 @@
-"""
-Analytics page.
-Main page for F1 data analysis.
-
-This page demonstrates:
-- Fetching data from backend API
-- Using callbacks to update UI
-- Separation of concerns (no data processing here)
-"""
+"""Analytics page - Main F1 data analysis interface"""
 import dash
-from dash import html, dcc, Input, Output, State, callback
-import requests
-from frontend.config import config
-from frontend.components.charts import create_lap_time_chart
+from dash import html, dcc, Input, Output, State
+import pandas as pd
+import io
+
+from frontend.components.charts import lap_time_chart, position_chart, speed_telemetry_chart
+from frontend.api import client
 
 dash.register_page(__name__, path="/analytics", name="Analytics")
 
 
 layout = html.Div([
-    html.H2("📊 F1 Analytics"),
+    html.H2("📊 Analytics"),
     
-    # Filters section
+    # Warning message when cache is empty
+    html.Div(id="cache-warning", style={"margin": "20px 0"}),
+
     html.Div([
         html.Div([
             html.Label("Season"),
-            dcc.Dropdown(
-                id="season-dropdown",
-                placeholder="Select season...",
-                value=2023
-            ),
-        ], className="filter", style={'flex': '1'}),
-        
+            dcc.Dropdown(id="season-dropdown", options=[], placeholder="Select season"),
+        ], className="filter"),
+
         html.Div([
             html.Label("Race"),
-            dcc.Dropdown(
-                id="race-dropdown",
-                placeholder="Select race...",
-            ),
-        ], className="filter", style={'flex': '1'}),
-        
-        html.Button("Load Data", id="load-btn", n_clicks=0, className="btn-primary"),
-    ], style={
-        'display': 'flex',
-        'gap': '20px',
-        'margin-bottom': '30px',
-        'align-items': 'flex-end'
-    }),
-    
-    # Status/Loading indicator
-    html.Div(id="status-message", style={'margin': '10px 0'}),
-    
-    # Charts section
+            dcc.Dropdown(id="race-dropdown", options=[], placeholder="Select race"),
+        ], className="filter"),
+
+        html.Div([
+            html.Label("Driver"),
+            dcc.Dropdown(id="driver-dropdown", options=[], placeholder="Select driver (optional)"),
+        ], className="filter"),
+
+        html.Div([
+            html.Button("Load Race", id="load-button", n_clicks=0, className="btn-primary")
+        ], className="filter"),
+    ], className="filters"),
+
+    # Stores for session and laps (persist across page refresh in browser tab)
+    dcc.Store(id="laps-store", storage_type="session"),
+    dcc.Store(id="session-store", storage_type="session"),  
+    # Trigger to load seasons on page load
+    dcc.Store(id="page-load-trigger", data={"loaded": True}),
+
     html.Div([
-        dcc.Graph(id="sample-chart"),
-    ], id="charts-container"),
-    
-], style={'padding': '20px'})
+        dcc.Graph(id="lap-time-graph"),
+        dcc.Graph(id="position-graph"),
+        dcc.Graph(id="speed-telemetry-graph"),
+    ], className="charts"),
+])
 
 
-# Callback to load seasons on page load
-@callback(
+@dash.callback(
     Output("season-dropdown", "options"),
-    Input("season-dropdown", "id")  # Triggers on component mount
+    Output("season-dropdown", "value"),
+    Output("cache-warning", "children"),
+    Input("page-load-trigger", "data")
 )
 def load_seasons(_):
-    """
-    Fetch available seasons from backend API.
-    
-    This demonstrates:
-    - API call to backend
-    - Error handling
-    - Returning data for Dash dropdown
-    """
+    """Load available seasons from backend cache on page load."""
     try:
-        response = requests.get(
-            f"{config.BACKEND_API_URL}/data/seasons",
-            timeout=config.REQUEST_TIMEOUT
-        )
+        seasons = client.get_available_seasons()
         
-        if response.status_code == 200:
-            data = response.json()
-            if data.get('success'):
-                seasons = data.get('data', [])
-                return [{'label': str(s), 'value': s} for s in seasons]
+        if not seasons:
+            warning = html.Div([
+                html.Strong("⚠️ No data in SQLite cache", style={"color": "#ff9800"}),
+                html.P([
+                    "Run this command to populate the cache:",
+                    html.Br(),
+                    html.Code("python scripts/populate_cache.py --season 2024", 
+                             style={"background": "#f5f5f5", "padding": "8px", "display": "block", "margin": "10px 0"}),
+                ]),
+            ], style={
+                "border": "2px solid #ff9800",
+                "padding": "15px",
+                "borderRadius": "5px",
+                "backgroundColor": "#fff3e0"
+            })
+            return [], None, warning
         
-        # Fallback
-        return [{'label': '2023', 'value': 2023}]
+        options = [{"label": str(s), "value": s} for s in seasons]
+        return options, seasons[0] if seasons else None, None
+        
     except Exception as e:
         print(f"Error loading seasons: {e}")
-        return [{'label': '2023', 'value': 2023}]
+        error_msg = html.Div([
+            html.Strong("❌ Cannot connect to backend", style={"color": "#f44336"}),
+            html.P([
+                "Make sure the backend is running:",
+                html.Br(),
+                html.Code("python main.py", 
+                         style={"background": "#f5f5f5", "padding": "8px", "display": "block", "margin": "10px 0"}),
+            ]),
+        ], style={
+            "border": "2px solid #f44336",
+            "padding": "15px",
+            "borderRadius": "5px",
+            "backgroundColor": "#ffebee"
+        })
+        return [], None, error_msg
 
 
-# Callback to load races when season changes
-@callback(
+@dash.callback(
     Output("race-dropdown", "options"),
     Input("season-dropdown", "value")
 )
-def load_races(season):
-    """
-    Fetch races for selected season from backend API.
-    """
+def update_races(season: int):
+    """Load races for selected season."""
     if not season:
         return []
     
-    try:
-        response = requests.get(
-            f"{config.BACKEND_API_URL}/data/races/{season}",
-            timeout=config.REQUEST_TIMEOUT
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            if data.get('success'):
-                races = data.get('data', [])
-                return [
-                    {'label': f"{r.get('name', 'Unknown')} - {r.get('location', '')}", 'value': r.get('name')}
-                    for r in races
-                ]
-        
+    races = client.get_races_for_season(season)
+    
+    if not races:
         return []
-    except Exception as e:
-        print(f"Error loading races: {e}")
-        return []
+    
+    return [{"label": r, "value": r} for r in races]
 
 
-# Callback to load and display data
-@callback(
-    [Output("sample-chart", "figure"),
-     Output("status-message", "children")],
-    Input("load-btn", "n_clicks"),
-    [State("season-dropdown", "value"),
-     State("race-dropdown", "value")]
+@dash.callback(
+    Output("laps-store", "data"),
+    Output("session-store", "data"),
+    Input("load-button", "n_clicks"),
+    State("season-dropdown", "value"),
+    State("race-dropdown", "value"),
+    allow_duplicate=True,
+    prevent_initial_call=True
 )
-def load_and_display_data(n_clicks, season, race):
-    """
-    Load session data from backend and display charts.
+def handle_load(load_n: int, season: int, race: str):
+    """Load a race session and store laps + session meta."""
+    if not load_n or not season or not race:
+        return dash.no_update, dash.no_update
+
+    laps, _, session = client.load_race_session(season, race)
     
-    This demonstrates the frontend/backend separation:
-    - Frontend: handles UI interaction, makes API call
-    - Backend: processes data, returns clean results
-    """
-    if n_clicks == 0 or not season or not race:
-        empty_fig = create_lap_time_chart([], "Select season and race")
-        return empty_fig, html.Div("Select season and race, then click Load Data", style={'color': '#666'})
+    if laps.empty:
+        return None, None
+    
+    laps_json = laps.to_json(date_format="iso", orient="split")
+    session_meta = {"season": season, "race": race, "drivers": session.get("drivers", [])}
+    
+    return laps_json, session_meta
+
+
+@dash.callback(
+    Output("driver-dropdown", "options"),
+    Input("laps-store", "data"),
+)
+def update_drivers(laps_json: str):
+    """Extract driver list from loaded laps."""
+    if not laps_json:
+        return []
     
     try:
-        # Status: loading
-        status = html.Div("⏳ Loading data from backend...", style={'color': 'blue'})
+        laps = pd.read_json(io.StringIO(laps_json), orient="split")
+        drivers = sorted(laps["Driver"].unique().tolist()) if "Driver" in laps.columns else []
+        return [{"label": d, "value": d} for d in drivers]
+    except:
+        return []
+
+
+@dash.callback(
+    Output("lap-time-graph", "figure"),
+    Output("position-graph", "figure"),
+    Output("speed-telemetry-graph", "figure"),
+    Input("driver-dropdown", "value"),
+    State("laps-store", "data"),
+)
+def update_charts(driver: str, laps_json: str):
+    """Update all charts based on selected driver."""
+    # Default empty figures
+    empty_fig = {"data": [], "layout": {"template": "plotly_white", "title": "No data loaded"}}
+    
+    if not laps_json:
+        return empty_fig, empty_fig, empty_fig
+
+    try:
+        laps = pd.read_json(io.StringIO(laps_json), orient="split")
         
-        # Call backend API
-        response = requests.get(
-            f"{config.BACKEND_API_URL}/data/session",
-            params={'season': season, 'event': race},
-            timeout=config.REQUEST_TIMEOUT
-        )
+        lap_fig = lap_time_chart(laps, driver)
+        pos_fig = position_chart(laps, driver)
         
-        if response.status_code == 200:
-            data = response.json()
-            
-            if data.get('success'):
-                session_data = data.get('data', {})
-                laps = session_data.get('laps', [])
-                
-                # Create chart from data
-                fig = create_lap_time_chart(
-                    [{'lap': l.get('LapNumber'), 'time': l.get('LapTimeSeconds')} 
-                     for l in laps if l.get('LapTimeSeconds')],
-                    f"Lap Times - {race} {season}"
-                )
-                
-                status = html.Div(
-                    f"✅ Loaded {len(laps)} laps from {race} {season}",
-                    style={'color': 'green'}
-                )
-                
-                return fig, status
-            else:
-                error_msg = data.get('error', 'Unknown error')
-                status = html.Div(f"❌ Error: {error_msg}", style={'color': 'red'})
-                return create_lap_time_chart([], "Error loading data"), status
-        else:
-            status = html.Div(f"❌ Backend returned {response.status_code}", style={'color': 'red'})
-            return create_lap_time_chart([], "Backend error"), status
-            
-    except requests.Timeout:
-        status = html.Div("❌ Request timeout - backend may be slow or down", style={'color': 'red'})
-        return create_lap_time_chart([], "Timeout"), status
+        # Telemetry not available from cache
+        speed_fig = speed_telemetry_chart(pd.DataFrame())
+        
+        return lap_fig, pos_fig, speed_fig
+        
     except Exception as e:
-        status = html.Div(f"❌ Error: {str(e)}", style={'color': 'red'})
-        return create_lap_time_chart([], "Error"), status
+        print(f"Error updating charts: {e}")
+        return empty_fig, empty_fig, empty_fig

@@ -1,116 +1,207 @@
 """
-Chart components.
-Reusable chart functions using Plotly.
+Plotly chart components for F1 analytics.
+
+All charts return plotly.graph_objs.Figure objects that can be
+used with dcc.Graph components in Dash.
 """
-import plotly.graph_objects as go
-import plotly.express as px
+from typing import Optional
+import plotly.graph_objs as go
+import pandas as pd
 
 
-def create_lap_time_chart(data, title="Lap Times"):
+def lap_time_chart(laps: pd.DataFrame, driver: Optional[str] = None) -> go.Figure:
     """
-    Create lap time line chart.
+    Create a lap time chart (lap number vs lap time seconds).
     
     Args:
-        data: List of dicts with 'lap' and 'time' keys
-        title: Chart title
+        laps: DataFrame with columns LapNumber, LapTimeSeconds, Driver
+        driver: Optional driver code to filter by
     
     Returns:
-        Plotly figure
+        Plotly Figure object
     """
-    if not data:
-        return go.Figure().add_annotation(
-            text="No data available",
-            xref="paper", yref="paper",
-            x=0.5, y=0.5, showarrow=False
-        )
+    df = laps.copy()
     
+    if driver:
+        df = df[df["Driver"] == driver]
+
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=[d.get('lap', i) for i, d in enumerate(data)],
-        y=[d.get('time', 0) for d in data],
-        mode='lines+markers',
-        name='Lap Time'
-    ))
     
+    if not df.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=df["LapNumber"],
+                y=df["LapTimeSeconds"],
+                mode="lines+markers",
+                name=f"Lap Time {driver or 'All Drivers'}",
+                line=dict(width=2),
+                marker=dict(size=6)
+            )
+        )
+
     fig.update_layout(
-        title=title,
+        title="Lap Time Analysis",
         xaxis_title="Lap Number",
-        yaxis_title="Time (seconds)",
-        template="plotly_dark"
+        yaxis_title="Lap Time (seconds)",
+        template="plotly_white",
+        hovermode="x unified",
+        height=400
     )
     
     return fig
 
 
-def create_position_chart(data, title="Position Changes"):
+def position_chart(laps: pd.DataFrame, driver: Optional[str] = None) -> go.Figure:
     """
-    Create position line chart.
+    Create a race position over laps chart.
     
     Args:
-        data: List of dicts with 'lap' and 'position' keys
-        title: Chart title
+        laps: DataFrame with columns LapNumber, Position, Driver
+        driver: Optional driver code to filter by
     
     Returns:
-        Plotly figure
+        Plotly Figure object
     """
-    if not data:
-        return go.Figure().add_annotation(
-            text="No data available",
-            xref="paper", yref="paper",
-            x=0.5, y=0.5, showarrow=False
-        )
+    df = laps.copy()
     
+    if driver:
+        df = df[df["Driver"] == driver]
+
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=[d.get('lap', i) for i, d in enumerate(data)],
-        y=[d.get('position', 0) for d in data],
-        mode='lines+markers',
-        name='Position'
-    ))
     
+    if not df.empty and "Position" in df.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=df["LapNumber"],
+                y=df["Position"],
+                mode="lines+markers",
+                name=f"Position {driver or 'All Drivers'}",
+                line=dict(width=2),
+                marker=dict(size=6)
+            )
+        )
+        # Reverse Y-axis so position 1 is at the top
+        fig.update_yaxes(autorange="reversed")
+
     fig.update_layout(
-        title=title,
+        title="Race Position Over Laps",
         xaxis_title="Lap Number",
         yaxis_title="Position",
-        yaxis_autorange="reversed",  # Lower position = better
-        template="plotly_dark"
+        template="plotly_white",
+        hovermode="x unified",
+        height=400
     )
     
     return fig
 
 
-def create_telemetry_chart(data, title="Speed Telemetry"):
+def speed_telemetry_chart(telemetry: pd.DataFrame) -> go.Figure:
     """
-    Create telemetry chart (speed vs distance).
+    Plot speed over distance/time from telemetry.
     
     Args:
-        data: List of dicts with 'distance' and 'speed' keys
-        title: Chart title
+        telemetry: DataFrame with Speed and Distance/Time columns
     
     Returns:
-        Plotly figure
+        Plotly Figure object
     """
-    if not data:
-        return go.Figure().add_annotation(
-            text="No data available",
-            xref="paper", yref="paper",
-            x=0.5, y=0.5, showarrow=False
-        )
-    
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=[d.get('distance', i) for i, d in enumerate(data)],
-        y=[d.get('speed', 0) for d in data],
-        mode='lines',
-        name='Speed',
-        line=dict(color='#FF1E00', width=2)
-    ))
+    
+    if telemetry.empty:
+        fig.update_layout(
+            title="No Telemetry Available",
+            template="plotly_white",
+            annotations=[{
+                'text': 'Telemetry data is not stored in the cache',
+                'showarrow': False,
+                'xref': 'paper',
+                'yref': 'paper',
+                'x': 0.5,
+                'y': 0.5,
+                'font': {'size': 14, 'color': 'gray'}
+            }]
+        )
+        return fig
+
+    # Determine X-axis column
+    x_col = None
+    if "Distance" in telemetry.columns:
+        x_col = "Distance"
+        x_label = "Distance (m)"
+    elif "Time" in telemetry.columns:
+        x_col = "Time"
+        x_label = "Time (s)"
+    else:
+        # Fallback to index
+        telemetry = telemetry.reset_index()
+        x_col = telemetry.columns[0]
+        x_label = "Index"
+
+    if "Speed" in telemetry.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=telemetry[x_col],
+                y=telemetry["Speed"],
+                mode="lines",
+                name="Speed",
+                line=dict(width=2)
+            )
+        )
+
+    fig.update_layout(
+        title="Speed Telemetry",
+        xaxis_title=x_label,
+        yaxis_title="Speed (km/h)",
+        template="plotly_white",
+        hovermode="x unified",
+        height=400
+    )
+    
+    return fig
+
+
+def driver_comparison_chart(laps: pd.DataFrame, drivers: list) -> go.Figure:
+    """
+    Compare lap times for multiple drivers.
+    
+    Args:
+        laps: DataFrame with LapNumber, LapTimeSeconds, Driver
+        drivers: List of driver codes to compare
+    
+    Returns:
+        Plotly Figure object
+    """
+    fig = go.Figure()
+    
+    for driver in drivers:
+        driver_laps = laps[laps["Driver"] == driver]
+        
+        if not driver_laps.empty:
+            fig.add_trace(
+                go.Scatter(
+                    x=driver_laps["LapNumber"],
+                    y=driver_laps["LapTimeSeconds"],
+                    mode="lines+markers",
+                    name=driver,
+                    line=dict(width=2),
+                    marker=dict(size=5)
+                )
+            )
     
     fig.update_layout(
-        title=title,
-        xaxis_title="Distance (m)",
-        yaxis_title="Speed (km/h)",
-        template="plotly_dark"
+        title="Driver Comparison - Lap Times",
+        xaxis_title="Lap Number",
+        yaxis_title="Lap Time (seconds)",
+        template="plotly_white",
+        hovermode="x unified",
+        height=500,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
     )
     
     return fig

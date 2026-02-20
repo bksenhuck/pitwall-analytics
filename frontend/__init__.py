@@ -1,1 +1,1 @@
-"""Frontend package initialization"""
+"""Frontend package for Pitwall Analytics Dash application"""

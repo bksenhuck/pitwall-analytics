@@ -1,41 +1,109 @@
 """
-Data API endpoints.
-Thin controllers that delegate to service layer.
+Data API V2 - Uses Normalized Cache Only
 
-FastAPI advantages:
-- Automatic request/response validation
-- Type hints for better IDE support
-- Async support for better performance
-- Automatic OpenAPI documentation
+Key difference from V1:
+- V1: Called FastF1 directly, slow, unpredictable
+- V2: Reads from SQLite cache, fast, only shows what's available
+
+New endpoints:
+- GET /api/v2/data/available - Lists all cached data
+- GET /api/v2/data/stats - Database statistics
 """
 from fastapi import APIRouter, HTTPException, Query
 from typing import Dict, Any, Optional
 from backend.services.f1_data_service import F1DataService
 
-# Create APIRouter (equivalent to Flask Blueprint)
+# Create APIRouter
 router = APIRouter()
 
-# Initialize service (singleton pattern)
+# Initialize service
 f1_service = F1DataService()
+
+
+@router.get('/data/available')
+async def get_available_data() -> Dict[str, Any]:
+    """
+    Get complete map of ALL cached data.
+    
+    Returns availability tree:
+    {
+        "seasons": [2023, 2024],
+        "2024": {
+            "events": ["Bahrain", "Saudi Arabian", ...],
+            "Bahrain": {
+                "sessions": ["FP1", "FP2", "Q", "R"],
+                "R": {
+                    "laps": 1234,
+                    "results": 20,
+                    "weather": 150
+                }
+            }
+        }
+    }
+    
+    Frontend should use this to populate dropdowns!
+    """
+    try:
+        available = f1_service.get_available_data()
+        # Return directly without wrapper for easier frontend consumption
+        return available
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get('/data/stats')
+async def get_database_stats() -> Dict[str, Any]:
+    """
+    Get database statistics.
+    
+    Returns:
+        Statistics about cached data
+    """
+    try:
+        stats = f1_service.get_database_stats()
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get('/data/seasons')
 async def get_seasons() -> Dict[str, Any]:
     """
-    Get available F1 seasons.
+    Get available F1 seasons from cache.
     
     Returns:
-        dict: Response with list of available seasons
-    
-    Raises:
-        HTTPException: If data retrieval fails
+        List of season years
     """
     try:
         seasons = f1_service.get_available_seasons()
-        return {
-            'success': True,
-            'data': seasons
-        }
+        return seasons
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get('/data/seasons/{season}')
+async def get_season_info(season: int) -> Dict[str, Any]:
+    """
+    Get season information and statistics.
+    
+    Args:
+        season: Year (e.g., 2024)
+    
+    Returns:
+        Season info with event count, session count, etc.
+    """
+    try:
+        info = f1_service.get_season_info(season)
+        
+        if not info:
+            raise HTTPException(
+                status_code=404,
+                detail=f'Season {season} not found in cache'
+            )
+        
+        return info
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -43,46 +111,52 @@ async def get_seasons() -> Dict[str, Any]:
 @router.get('/data/races/{season}')
 async def get_races(season: int) -> Dict[str, Any]:
     """
-    Get races for a specific season.
+    Get races for a specific season from cache.
     
     Args:
-        season: Year (e.g., 2023)
+        season: Year (e.g., 2024)
     
     Returns:
-        dict: Response with list of race events
-    
-    Raises:
-        HTTPException: If data retrieval fails
+        List of race events
     """
     try:
         races = f1_service.get_races_for_season(season)
-        return {
-            'success': True,
-            'data': races
-        }
+        return races
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get('/data/session')
 async def get_session_data(
-    season: Optional[int] = Query(None, description="Season year (e.g., 2023)"),
-    event: Optional[str] = Query(None, description="Event name (e.g., 'Monaco')"),
-    session_type: str = Query('R', description="Session type: R (Race), Q (Qualifying), FP1, FP2, FP3")
+    season: Optional[int] = Query(None, description="Season year (e.g., 2024)"),
+    event: Optional[str] = Query(None, description="Event name (e.g., 'Bahrain')"),
+    session_type: str = Query('R', description="Session type: R, Q, FP1, FP2, FP3, S, SQ"),
+    include_laps: bool = Query(True, description="Include lap data"),
+    include_results: bool = Query(True, description="Include results"),
+    include_weather: bool = Query(False, description="Include weather data"),
+    include_messages: bool = Query(False, description="Include race control messages"),
+    driver: Optional[str] = Query(None, description="Filter by driver code")
 ) -> Dict[str, Any]:
     """
-    Get session data (laps, telemetry, etc.).
+    Get complete session data from cache.
     
     Query parameters:
-        - season: int (e.g., 2023) - Required
-        - event: str (e.g., "Monaco") - Required
-        - session_type: str (default: "R" for Race)
+        - season: Year (required)
+        - event: Event name (required)
+        - session_type: Session type (default: 'R')
+        - include_laps: Include lap data (default: true)
+        - include_results: Include results (default: true)
+        - include_weather: Include weather (default: false)
+        - include_messages: Include race control messages (default: false)
+        - driver: Filter laps by driver code (optional)
     
     Returns:
-        dict: Session data with laps and metadata
-    
+        Complete session data
+        
     Raises:
-        HTTPException: If parameters are missing or data retrieval fails
+        400: Missing required parameters
+        404: Session not found in cache
+        500: Server error
     """
     # Validate required parameters
     if not season or not event:
@@ -92,38 +166,98 @@ async def get_session_data(
         )
     
     try:
-        session_data = f1_service.load_session_data(season, event, session_type)
-        return {
-            'success': True,
-            'data': session_data
-        }
+        session_data = f1_service.load_session_data(
+            season=season,
+            event=event,
+            session_type=session_type,
+            include_laps=include_laps,
+            include_results=include_results,
+            include_weather=include_weather,
+            include_messages=include_messages,
+            driver_filter=driver
+        )
+        
+        return session_data
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        error_msg = str(e)
+        
+        # Determine appropriate status code
+        if 'not found' in error_msg.lower():
+            status_code = 404
+        else:
+            status_code = 500
+        
+        raise HTTPException(status_code=status_code, detail=error_msg)
 
 
-@router.get('/data')
-async def get_sample_data() -> Dict[str, Any]:
+@router.get('/data/session/laps')
+async def get_session_laps(
+    season: int = Query(..., description="Season year"),
+    event: str = Query(..., description="Event name"),
+    session_type: str = Query('R', description="Session type"),
+    driver: Optional[str] = Query(None, description="Filter by driver")
+) -> Dict[str, Any]:
     """
-    Sample endpoint returning mock data.
-    Demonstrates async backend API pattern.
-    
-    This endpoint can be used to test async external API calls.
+    Get lap data for a session.
     
     Returns:
-        dict: Sample data response
+        List of laps
     """
-    # Future: Add async external API call here using httpx
-    # Example:
-    # async with httpx.AsyncClient() as client:
-    #     response = await client.get('https://external-api.com/data')
-    #     external_data = response.json()
+    try:
+        laps = f1_service.get_session_laps(season, event, session_type, driver)
+        return laps
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get('/data/session/results')
+async def get_session_results(
+    season: int = Query(..., description="Season year"),
+    event: str = Query(..., description="Event name"),
+    session_type: str = Query('R', description="Session type")
+) -> Dict[str, Any]:
+    """
+    Get results/standings for a session.
     
-    return {
-        'success': True,
-        'message': 'Backend API is working with FastAPI!',
-        'data': {
-            'sample': 'This is sample data from the FastAPI backend',
-            'timestamp': '2026-02-19',
-            'async_ready': True
-        }
-    }
+    Returns:
+        List of results
+    """
+    try:
+        results = f1_service.get_session_results(season, event, session_type)
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get('/data/session/drivers')
+async def get_session_drivers(
+    season: int = Query(..., description="Season year"),
+    event: str = Query(..., description="Event name"),
+    session_type: str = Query('R', description="Session type")
+) -> Dict[str, Any]:
+    """
+    Get list of drivers in a session.
+    
+    Returns:
+        List of driver codes
+    """
+    try:
+        drivers = f1_service.get_drivers_in_session(season, event, session_type)
+        return drivers
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get('/data/sessions/{season}/{event}')
+async def get_available_sessions(season: int, event: str) -> Dict[str, Any]:
+    """
+    Get available session types for an event.
+    
+    Returns:
+        List of session types that have data
+    """
+    try:
+        sessions = f1_service.get_available_sessions_for_event(season, event)
+        return sessions
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

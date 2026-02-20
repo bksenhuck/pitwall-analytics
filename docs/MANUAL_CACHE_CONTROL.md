@@ -1,5 +1,8 @@
 # 🎮 Controle Manual do Cache SQLite
 
+> **📍 Localização**: Este documento está em `docs/MANUAL_CACHE_CONTROL.md`  
+> **🔗 Veja também**: [AUTO_CACHE_GUIDE.md](AUTO_CACHE_GUIDE.md) | [../scripts/README.md](../scripts/README.md)
+
 ## 🎯 Nova Arquitetura
 
 Agora VOCÊ controla quando o cache é atualizado. **Sem TTL automático, sem fallback para API externa.**
@@ -24,7 +27,7 @@ Agora VOCÊ controla quando o cache é atualizado. **Sem TTL automático, sem fa
 │         VOCÊ (Admin/Terminal)           │
 │  Controla quando POPULAR o cache        │
 │  POST /api/cached/populate              │
-│  OU: python populate_cache.py           │
+│  OU: python scripts/populate_cache.py   │
 └─────────────────────────────────────────┘
 ```
 
@@ -36,31 +39,31 @@ Agora VOCÊ controla quando o cache é atualizado. **Sem TTL automático, sem fa
 
 ```powershell
 # Popular cache para temporadas F1
-python populate_cache.py f1_seasons
+python scripts/populate_cache.py f1_seasons
 
 # Popular calendário de corridas para 2024
-python populate_cache.py races_2024
+python scripts/populate_cache.py races_2024
 
 # Popular cache para uma corrida específica
-python populate_cache.py race_2024_bahrain
+python scripts/populate_cache.py race_2024_bahrain
 
 # Popular múltiplas corridas
-python populate_cache.py race_2024_monaco
-python populate_cache.py race_2024_silverstone
-python populate_cache.py race_2024_monza
+python scripts/populate_cache.py race_2024_monaco
+python scripts/populate_cache.py race_2024_silverstone
+python scripts/populate_cache.py race_2024_monza
 
 # Listar todos os cache keys
-python populate_cache.py --list
+python scripts/populate_cache.py --list
 
 # Ver informações de um cache key
-python populate_cache.py --info f1_seasons
-python populate_cache.py --info races_2024
+python scripts/populate_cache.py --info f1_seasons
+python scripts/populate_cache.py --info races_2024
 
 # Deletar um cache key
-python populate_cache.py --delete f1_seasons
+python scripts/populate_cache.py --delete f1_seasons
 
 # Ajuda
-python populate_cache.py --help
+python scripts/populate_cache.py --help
 ```
 
 ### Opção 2: API Endpoints
@@ -178,11 +181,11 @@ curl -X DELETE "http://127.0.0.1:5000/api/cached/cache?key=f1_seasons"
 ```
 
 ---s_2024
-python populate_cache.py race_2024_bahrain
-python populate_cache.py race_2024_jeddah
+python scripts/populate_cache.py race_2024_bahrain
+python scripts/populate_cache.py race_2024_jeddah
 
 # 2. Verificar o que foi populado
-python populate_cache.py --list
+python scripts/populate_cache.py --list
 
 # 3. Iniciar backend
 python -m backend.app
@@ -193,7 +196,7 @@ python -m backend.app
 # GET /api/cached/read?key=race_2024_bahrainhrain
 
 # 2. Verificar o que foi populado
-python populate_cache.py --list
+python scripts/populate_cache.py --list
 
 # 3. Iniciar backend
 python -m backend.app
@@ -210,7 +213,7 @@ python -m backend.app
 # Quando nova temporada F1 começar ou dados mudarem:
 
 # 1. Atualizar cache manualmente
-python populate_cache.py f1_seasons
+python scripts/populate_cache.py f1_seasons
 
 # 2. Frontend automaticamente verá dados novos na próxima leitura
 ```
@@ -221,13 +224,13 @@ python populate_cache.py f1_seasons
 
 ```powershell
 # Ver informações de um cache
-python populate_cache.py --info f1_seasons
+python scripts/populate_cache.py --info f1_seasons
 
 # Deletar cache corrompido
-python populate_cache.py --delete f1_seasons
+python scripts/populate_cache.py --delete f1_seasons
 
 # Repopular
-python populate_cache.py f1_seasons
+python scripts/populate_cache.py f1_seasons
 ```
 
 ---
@@ -246,23 +249,23 @@ python populate_cache.py f1_seasons
 
 1. **`f1_seasons`** - Lista de temporadas
    ```powershell
-   python populate_cache.py f1_seasons
+   python scripts/populate_cache.py f1_seasons
    ```
    
 2. **`races_YEAR`** - Calendário de corridas para uma temporada
    ```powershell
-   python populate_cache.py races_2024
-   python populate_cache.py races_2023
+   python scripts/populate_cache.py races_2024
+   python scripts/populate_cache.py races_2023
    ```
    
 3. **`race_YEAR_EVENT`** - Dados completos de uma corrida
    ```powershell
    # Nome curto
-   python populate_cache.py race_2024_bahrain
+   python scripts/populate_cache.py race_2024_bahrain
    
    # Nome completo (underscores substituem espaços)
-   python populate_cache.py race_2024_Bahrain_Grand_Prix
-   python populate_cache.py race_2024_monaco
+   python scripts/populate_cache.py race_2024_Bahrain_Grand_Prix
+   python scripts/populate_cache.py race_2024_monaco
    ```
 
 ---
@@ -314,24 +317,24 @@ if response.status_code == 404:
 ---
 
 ## 📊 Comandos Rápidos temporadas
-python populate_cache.py races_2024           # Popular calendário 2024
-python populate_cache.py race_2024_bahrain    # Popular corrida específica
-python populate_cache.py --list               # Verificar
+python scripts/populate_cache.py races_2024           # Popular calendário 2024
+python scripts/populate_cache.py race_2024_bahrain    # Popular corrida específica
+python scripts/populate_cache.py --list               # Verificar
 python -m backend.app                         # Iniciar backend
 curl http://127.0.0.1:5000/api/cached/read?key=f1_seasons  # Testar
 
 # Atualização
-python populate_cache.py f1_seasons           # Atualizar quando necessário
-python populate_cache.py races_2024           # Atualizar calendário
+python scripts/populate_cache.py f1_seasons           # Atualizar quando necessário
+python scripts/populate_cache.py races_2024           # Atualizar calendário
 
 # Manutenção
-python populate_cache.py --info f1_seasons    # Ver info
-python populate_cache.py --info races_2024    # Ver info de calendári
-python populate_cache.py f1_seasons           # Atualizar quando necessário
+python scripts/populate_cache.py --info f1_seasons    # Ver info
+python scripts/populate_cache.py --info races_2024    # Ver info de calendári
+python scripts/populate_cache.py f1_seasons           # Atualizar quando necessário
 
 # Manutenção
-python populate_cache.py --info f1_seasons    # Ver info
-python populate_cache.py --delete f1_seasons  # Limpar
+python scripts/populate_cache.py --info f1_seasons    # Ver info
+python scripts/populate_cache.py --delete f1_seasons  # Limpar
 ```
 
 ---
@@ -343,7 +346,7 @@ python populate_cache.py --delete f1_seasons  # Limpar
 ```powershell
 # 1. Você percebe que tem dados novos na API externa
 # 2. Decide atualizar o cache
-python populate_cache.py f1_seasons
+python scripts/populate_cache.py f1_seasons
 
 # Output:
 # 📡 Fetching data from external API for key: f1_seasons
@@ -370,7 +373,7 @@ GET /api/cached/read?key=race_2024_miami
 
 **Solução:** Popular o cache primeiro
 ```bash
-python populate_cache.py race_2024_miami
+python scripts/populate_cache.py race_2024_miami
 ```
 
 ---
@@ -393,8 +396,9 @@ python populate_cache.py race_2024_miami
 | Ação | Como | Quem |
 |------|------|------|
 | **Ler dados** | `GET /read` | Frontend |
-| **Popular cache** | `POST /populate` ou `python populate_cache.py` | Você (Admin) |
+| **Popular cache** | `POST /populate` ou `python scripts/populate_cache.py` | Você (Admin) |
 | **Ver cache** | `GET /cache/keys` | Qualquer um |
 | **Deletar cache** | `DELETE /cache` | Você (Admin) |
 
 **Regra de Ouro:** Frontend lê, você escreve. Simples assim! 🎯
+

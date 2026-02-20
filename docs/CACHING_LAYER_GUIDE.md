@@ -1,5 +1,34 @@
 # 🗄️ Caching Layer Implementation Guide
 
+> **⚠️ OBSOLETE DOCUMENTATION**
+> 
+> This document describes an old TTL-based caching implementation that has been replaced.
+> 
+> **Please refer to:**
+> - [CACHE_V2_GUIDE.md](CACHE_V2_GUIDE.md) - Complete guide to the current normalized cache system
+> - [CACHE_V2_SUMMARY.md](../CACHE_V2_SUMMARY.md) - Quick summary and usage
+> - [CACHE_QUICK_REFERENCE.md](CACHE_QUICK_REFERENCE.md) - Quick reference
+
+---
+
+## Current Implementation Overview
+
+The current system uses:
+- **SQLite** with 8 normalized tables (not a single cached_data table)
+- **Pre-populated cache** (no TTL, data loaded offline via populate_cache.py)
+- **Cache-only service** (backend never calls FastF1 directly)
+- **Data discovery** (frontend queries /api/data/available to see what exists)
+
+For detailed information, see [CACHE_V2_GUIDE.md](CACHE_V2_GUIDE.md)
+
+---
+
+## Old Documentation (Historical Reference)
+
+The rest of this document describes the old implementation and is kept for historical reference only.
+
+---
+
 ## Overview
 
 A complete persistence and caching layer has been added to your FastAPI backend using:

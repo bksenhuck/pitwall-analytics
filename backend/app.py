@@ -56,7 +56,7 @@ def create_app() -> FastAPI:
     
     app.include_router(health_router, prefix="/api", tags=["Health"])
     app.include_router(data_router, prefix="/api", tags=["Data"])
-    app.include_router(cached_data_router, prefix="/api/cached", tags=["Cached Data"])
+    app.include_router(cached_data_router, prefix="/api/cached", tags=["Cached Data (Legacy)"])
     
     # Startup event: Initialize services
     @app.on_event("startup")
@@ -67,10 +67,10 @@ def create_app() -> FastAPI:
         init_cache(config.CACHE_DIR, config.CACHE_ENABLED)
         print("✅ FastF1 cache initialized")
         
-        # Initialize SQLite database for caching layer
+        # Initialize SQLite database (normalized schema)
         from backend.db.session import init_database
         init_database()
-        print("✅ SQLite cache database initialized")
+        print("✅ SQLite normalized cache database initialized")
     
     return app
 

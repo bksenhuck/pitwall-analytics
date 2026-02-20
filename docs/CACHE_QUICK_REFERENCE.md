@@ -1,44 +1,47 @@
 # Cache Layer - Quick Reference
 
-## 🚀 Quick Start
+> **⚠️ OBSOLETE DOCUMENTATION**
+> 
+> This document describes the old TTL-based cache system which has been replaced.
+> 
+> **Please refer to:**
+> - [CACHE_V2_GUIDE.md](../docs/CACHE_V2_GUIDE.md) - Complete guide to the normalized cache system
+> - [CACHE_V2_SUMMARY.md](../CACHE_V2_SUMMARY.md) - Quick summary and usage
 
-### 1. Install dependencies (already done)
+---
+
+## 🚀 Current System Quick Start
+
+### 1. Install dependencies
 ```powershell
 pip install -r requirements.txt
 ```
 
-### 2. Configure TTL (optional)
-```env
-# .env
-CACHE_TTL_SECONDS=3600  # 1 hour
+### 2. Populate cache with data
+```powershell
+python scripts/populate_cache.py --season 2024
 ```
 
 ### 3. Start backend
 ```powershell
-python -m backend.app
+python main.py
 ```
 
 The database will be automatically created at: `data/pitwall_cache.db`
 
 ---
 
-## 📡 API Endpoints Quick Reference
+## 📡 Current API Endpoints
 
 ```bash
-# Get cached data (with TTL logic)
-GET /api/cached/data?key=f1_seasons
+# Get available cached data
+GET /api/data/available
 
-# Force refresh (bypass cache)
-POST /api/cached/refresh?key=f1_seasons
+# Get session data (laps, results, weather)
+GET /api/data/session?season=2024&event=Bahrain&session_type=Race
 
-# Cache metadata
-GET /api/cached/cache/info?key=f1_seasons
-
-# List all cache keys
-GET /api/cached/cache/keys
-
-# Delete cache entry
-DELETE /api/cached/cache?key=f1_seasons
+# Get drivers for a session
+GET /api/data/session/drivers?season=2024&event=Bahrain&session_type=Race
 ```
 
 ---
@@ -49,89 +52,73 @@ DELETE /api/cached/cache?key=f1_seasons
 backend/
 ├── db/
 │   └── session.py                # SQLite connection
-├── models/
-│   └── data_model.py             # Pydantic models
+├── modCurrent File Structure
+
+```
+backend/
+├── db/
+│   └── session.py                # SQLite schema (8 normalized tables)
 ├── repositories/
 │   └── data_repository.py        # Database operations (CRUD)
-├── routes/
-│   └── data.py                   # Cache API endpoints
-└── services/
-    ├── cache_service_v2.py       # TTL cache logic
-    └── external_api.py           # External API calls
-```
+├── services/
+│   └── f1_data_service.py        # Business logic (cache-only)
+└── api/
+    └── data.py                   # API endpoints
 
----
-
-## 🔄 Cache Flow
-
+scripts/
+└── populate_cache.py             # Load FastF1 data into cache
 ```
 User Request
     ↓
 Cache Service (TTL check)
-    ↓
-┌─────────────────────────┐
-│ Cache exists & valid?   │
-├─────────────────────────┤
-│ YES → Return from DB ✅ │ (Fast: ~10ms)
-│ NO  → Fetch from API ⚡ │ (Slow: ~1s, then cache)
-└─────────────────────────┘
+    ↓urrent Cache Flow
+
 ```
+1. Offline: populate_cache.py → FastF1 → SQLite (normalized tables)
+2. Runtime: Frontend → API → F1DataService → DataRepository → SQLite
+                                                                ↓
+                                                          Return cached data
+```
+
+**Key difference:** Backend NEVER calls FastF1 directly. All data must be pre-loaded.
 
 ---
 
 ## 💻 Code Examples
 
-### Using cache in your routes
+### Using cached data in your code
 
 ```python
-from backend.services.cache_service_v2 import CacheService
-from backend.services.external_api import ExternalAPIService
+from backend.services.f1_data_service import F1DataService
 
-cache_service = CacheService()
-external_api = ExternalAPIService()
+service = F1DataService()
 
-@router.get('/seasons')
-async def get_seasons():
-    data, is_cached = await cache_service.get_data_with_cache(
-        cache_key="f1_seasons",
-        fetch_callback=external_api.fetch_f1_seasons
-    )
-    return {
-        'data': data,
-        'from_cache': is_cached
-    }
+# Get available data
+available = service.get_available_data()
+# Returns: {'2024': {'Bahrain': {'Race': ['VER', 'HAM', ...]}}}
+
+# Get session data
+session_data = service.get_session_data(
+    season=2024,
+    event='Bahrain',
+    session_type='Race',
+    driver_filter='VER'  # optional
+)
+# Returns: {'laps': [...], 'results': [...], 'weather': [...]}
 ```
 
-### Force refresh
+### Populating cache (run offline)
 
 ```python
-@router.post('/refresh-seasons')
-async def refresh_seasons():
-    fresh_data = await cache_service.refresh_data(
-        cache_key="f1_seasons",
-        fetch_callback=external_api.fetch_f1_seasons
-    )
-    return {'data': fresh_data}
-```
+# Command line
+python scripts/populate_cache.py --season 2024
 
-### Check cache status
+# Or with specific events
+python scripts/populate_cache.py --season 2024 --event Bahrain
 
-```python
-cache_info = cache_service.get_cache_info("f1_seasons")
-print(cache_info)
-# {
-#   'exists': True,
-#   'age_seconds': 1800,
-#   'ttl_seconds': 3600,
-#   'is_expired': False,
-#   'expires_in_seconds': 1800
-# }
-```
-
----
-
-## ⚙️ Configuration
-
+# Or programmatically
+from scripts.populate_cache import populate_season
+populate_season(2024, events=['Bahrain', 'Saudi Arabia'])
 ### Environment Variables
 
 | Variable | Default | Description |
@@ -148,23 +135,23 @@ CACHE_TTL_SECONDS=300     # 5 minutes
 CACHE_TTL_SECONDS=1800    # 30 minutes
 CACHE_TTL_SECONDS=3600    # 1 hour (default)
 CACHE_TTL_SECONDS=86400   # 24 hours
-```
+```Database Location
 
----
+The SQLite database is created at: `data/pitwall_cache.db`
 
-## 🧪 Testing
+### Schema
 
-### Test cache miss → hit flow
+8 normalized tables:
+- `seasons` - F1 seasons
+- `events` - Grand Prix events
+- `sessions` - Practice, Qualifying, Race sessions
+- `laps` - Lap timing data
+- `results` - Session results (finishing positions)
+- `weather` - Weather conditions
+- `race_control_messages` - Flags, penalties
+- `session_status` - Track status (green, yellow, red)
 
-```bash
-# 1. Clear cache
-curl -X DELETE "http://127.0.0.1:5000/api/cached/cache?key=f1_seasons"
-
-# 2. First request (miss - slow)
-curl "http://127.0.0.1:5000/api/cached/data?key=f1_seasons"
-# Response: "cached": false
-
-# 3. Second request (hit - fast)
+For complete schema details, see [CACHE_V2_GUIDE.md](../docs/CACHE_V2_GUIDE.md). Second request (hit - fast)
 curl "http://127.0.0.1:5000/api/cached/data?key=f1_seasons"
 # Response: "cached": true
 ```

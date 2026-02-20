@@ -12,6 +12,9 @@ dash.register_page(__name__, path="/analytics", name="Analytics")
 
 layout = html.Div([
     html.H2("Analytics"),
+    
+    # Warning message when cache is empty
+    html.Div(id="cache-warning", style={"margin": "20px 0"}),
 
     html.Div([
         html.Div([
@@ -52,22 +55,66 @@ layout = html.Div([
 @dash.callback(
     Output("season-dropdown", "options"),
     Output("season-dropdown", "value"),
+    Output("cache-warning", "children"),
     Input("page-load-trigger", "data")
 )
 def load_seasons(_):
     """Load available seasons from backend cache on page load."""
     try:
         seasons = data_loader.get_available_seasons()
+        
+        if not seasons:
+            # No data in cache - show warning
+            warning = html.Div([
+                html.Strong("⚠️ Nenhum dado no cache SQLite", style={"color": "#ff9800"}),
+                html.P([
+                    "Execute o comando abaixo para popular o cache com dados:",
+                    html.Br(),
+                    html.Code("python scripts/populate_cache.py --season 2024", 
+                             style={"background": "#f5f5f5", "padding": "5px", "display": "block", "margin": "10px 0"}),
+                ]),
+            ], style={
+                "border": "2px solid #ff9800",
+                "padding": "15px",
+                "borderRadius": "5px",
+                "backgroundColor": "#fff3e0"
+            })
+            return [], None, warning
+        
         options = [{"label": s, "value": s} for s in seasons]
-        return options, seasons[-1] if seasons else None  # Default to latest season
+        return options, seasons[0] if seasons else None, None  # Default to first (most recent) season
+        
     except Exception as e:
         print(f"Error loading seasons: {e}")
-        return [], None
+        error_msg = html.Div([
+            html.Strong("❌ Erro ao conectar com backend", style={"color": "#f44336"}),
+            html.P([
+                "Certifique-se de que o backend está rodando:",
+                html.Br(),
+                html.Code("python main.py", 
+                         style={"background": "#f5f5f5", "padding": "5px", "display": "block", "margin": "10px 0"}),
+            ]),
+        ], style={
+            "border": "2px solid #f44336",
+            "padding": "15px",
+            "borderRadius": "5px",
+            "backgroundColor": "#ffebee"
+        })
+        return [], None, error_msg
 
 
 @dash.callback(Output("race-dropdown", "options"), Input("season-dropdown", "value"))
 def update_races(season: int):
+    """Load races for selected season - shows only what exists in cache."""
+    if not season:
+        return []
+    
     races = data_loader.get_races_for_season(season)
+    
+    if not races:
+        print(f"⚠️  No races found for season {season}")
+        return []
+    
     return [{"label": r, "value": r} for r in races]
 
 

@@ -1,156 +1,330 @@
 """
-F1 Data Service.
-Business logic layer for F1 data processing using FastF1.
+F1 Data Service - Reads from Normalized Cache
 
-This service:
-- Fetches data from FastF1 API
-- Processes and transforms data
-- Applies business logic
-- Returns clean data to API layer
+This service ONLY reads from the SQLite cache.
+It NEVER calls FastF1 directly - that's done by populate_cache.py
+
+Benefits:
+- Fast response (no FastF1 API calls)
+- Offline operation
+- Predictable performance
+- Frontend only shows what's in cache
+
+Architecture:
+1. populate_cache.py -> SQLite (writes)
+2. DataRepository -> SQLite (reads)
+3. F1DataService -> DataRepository (business logic)
+4. API routes -> F1DataService (HTTP)
+5. Frontend -> API (UI)
 """
-from typing import List, Dict, Any
-import fastf1 as ff1
-import pandas as pd
+from typing import List, Dict, Any, Optional
+from backend.repositories.data_repository import DataRepository
 
 
 class F1DataService:
-    """Service for F1 data operations"""
+    """Service for F1 data operations using cache ONLY"""
+    
+    def __init__(self):
+        """Initialize service with repository"""
+        self.repo = DataRepository()
+    
+    # ===== SEASON METHODS =====
     
     def get_available_seasons(self) -> List[int]:
         """
-        Get list of available F1 seasons.
+        Get all available seasons from cache.
         
         Returns:
             List of season years
         """
-        # Can be extended to query from database or external API
-        return [2021, 2022, 2023, 2024]
+        return self.repo.get_all_seasons()
+    
+    def get_season_info(self, season: int) -> Optional[Dict[str, Any]]:
+        """
+        Get season information and statistics.
+        
+        Returns:
+            Season info dict or None if not found
+        """
+        seasons = self.repo.get_all_seasons()
+        if season not in seasons:
+            return None
+        
+        stats = self.repo.get_season_stats(season)
+        return stats
+    
+    # ===== EVENT METHODS =====
     
     def get_races_for_season(self, season: int) -> List[Dict[str, Any]]:
         """
-        Get all races for a given season.
+        Get all races/events for a season.
         
         Args:
-            season: Year (e.g., 2023)
+            season: Year (e.g., 2024)
         
         Returns:
-            List of race events with metadata
+            List of event dictionaries
         """
-        try:
-            schedule = ff1.get_event_schedule(season)
-            
-            races = []
-            for idx, row in schedule.iterrows():
-                races.append({
-                    'round': int(row.get('RoundNumber', idx + 1)),
-                    'name': str(row.get('EventName', row.get('OfficialEventName', 'Unknown'))),
-                    'location': str(row.get('Location', row.get('Country', 'Unknown'))),
-                    'date': str(row.get('EventDate', ''))
-                })
-            
-            return races
-        except Exception as e:
-            # Fallback to minimal list
-            print(f"⚠️  Error fetching schedule: {e}")
-            return [
-                {'round': 1, 'name': 'Bahrain', 'location': 'Bahrain', 'date': ''},
-                {'round': 2, 'name': 'Saudi Arabian', 'location': 'Saudi Arabia', 'date': ''},
-                {'round': 3, 'name': 'Australian', 'location': 'Australia', 'date': ''}
-            ]
+        events = self.repo.get_events_for_season(season)
+        
+        # Format for frontend compatibility
+        formatted = []
+        for event in events:
+            formatted.append({
+                'round': event['round'],
+                'name': event['name'],
+                'location': event['location'],
+                'country': event['country'],
+                'date': event['date'],
+                'format': event['format']
+            })
+        
+        return formatted
     
-    def load_session_data(self, season: int, event: str, session_type: str = 'R') -> Dict[str, Any]:
+    # ===== SESSION METHODS =====
+    
+    def load_session_data(
+        self, 
+        season: int, 
+        event: str, 
+        session_type: str = 'R',
+        include_laps: bool = True,
+        include_results: bool = True,
+        include_weather: bool = False,
+        include_messages: bool = False,
+        driver_filter: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
-        Load session data including laps and basic statistics.
+        Load complete session data from cache.
         
         Args:
             season: Year
-            event: Race name
-            session_type: 'R' for Race, 'Q' for Qualifying, 'FP1', 'FP2', 'FP3'
+            event: Event name (e.g., "Bahrain")
+            session_type: Session type ('R', 'Q', 'FP1', etc.)
+            include_laps: Include lap data
+            include_results: Include results/standings
+            include_weather: Include weather data
+            include_messages: Include race control messages
+            driver_filter: Optional driver code filter
         
         Returns:
-            Dictionary with session data, laps, and metadata
+            Complete session data dictionary
+            
+        Raises:
+            Exception: If session not found in cache
         """
-        try:
-            # Load session
-            session = ff1.get_session(season, event, session_type)
-            session.load(laps=True, telemetry=False, weather=False)
-            
-            # Process laps
-            laps = session.laps.copy()
-            
-            # Convert lap times to seconds for easier processing
-            if 'LapTime' in laps.columns:
-                laps['LapTimeSeconds'] = laps['LapTime'].dt.total_seconds()
-            
-            # Get drivers
-            drivers = laps['Driver'].unique().tolist() if 'Driver' in laps.columns else []
-            
-            # Convert to dict for JSON serialization
-            laps_dict = laps.to_dict('records')
-            
-            # Clean up non-serializable objects
-            laps_dict = self._clean_for_json(laps_dict)
-            
-            return {
-                'session': {
-                    'season': season,
-                    'event': event,
-                    'type': session_type,
-                    'name': str(session.event.get('EventName', event))
-                },
-                'drivers': drivers,
-                'laps': laps_dict[:100],  # Limit for demo, implement pagination in production
-                'total_laps': len(laps_dict)
+        # Get event
+        event_data = self.repo.get_event_by_name(season, event)
+        if not event_data:
+            raise Exception(f"Event '{event}' not found for season {season} in cache")
+        
+        event_id = event_data['id']
+        
+        # Get session
+        session_data = self.repo.get_session(event_id, session_type)
+        if not session_data:
+            raise Exception(f"Session '{session_type}' not found for {event} {season} in cache")
+        
+        if not session_data['has_data']:
+            raise Exception(f"Session '{session_type}' exists but has no data loaded")
+        
+        session_id = session_data['id']
+        
+        # Build response
+        response = {
+            'session': {
+                'season': season,
+                'event': event_data['name'],
+                'round': event_data['round'],
+                'type': session_data['type'],
+                'name': session_data['name'],
+                'date': session_data['date'],
+                'track_length': session_data['track_length']
             }
-        except Exception as e:
-            raise Exception(f"Failed to load session data: {str(e)}")
+        }
+        
+        # Add requested data
+        if include_laps:
+            laps = self.repo.get_laps_for_session(session_id, driver_filter)
+            response['laps'] = laps
+            response['total_laps'] = len(laps)
+            
+            # Get drivers list
+            drivers = self.repo.get_drivers_in_session(session_id)
+            response['drivers'] = drivers
+        
+        if include_results:
+            results = self.repo.get_results_for_session(session_id)
+            response['results'] = results
+        
+        if include_weather:
+            weather = self.repo.get_weather_for_session(session_id)
+            response['weather'] = weather
+        
+        if include_messages:
+            messages = self.repo.get_race_control_messages(session_id)
+            response['race_control_messages'] = messages
+            
+            status = self.repo.get_session_status(session_id)
+            response['session_status'] = status
+        
+        return response
     
-    def get_driver_telemetry(self, session_obj, driver: str, lap_number: int) -> Dict[str, Any]:
+    def get_session_laps(
+        self, 
+        season: int, 
+        event: str, 
+        session_type: str = 'R',
+        driver: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """
-        Get telemetry data for a specific driver and lap.
+        Get lap data for a session.
         
         Args:
-            session_obj: FastF1 session object
-            driver: Driver code (e.g., 'VER', 'HAM')
-            lap_number: Lap number
+            season: Year
+            event: Event name
+            session_type: Session type
+            driver: Optional driver filter
         
         Returns:
-            Telemetry data dictionary
+            List of lap dictionaries
         """
-        try:
-            lap = session_obj.laps.pick_driver(driver).pick_lap(lap_number)
-            telemetry = lap.get_telemetry()
-            
-            return {
-                'driver': driver,
-                'lap': lap_number,
-                'telemetry': telemetry.to_dict('records')[:1000]  # Limit points
-            }
-        except Exception as e:
-            raise Exception(f"Failed to load telemetry: {str(e)}")
+        event_data = self.repo.get_event_by_name(season, event)
+        if not event_data:
+            raise Exception(f"Event '{event}' not found")
+        
+        session_data = self.repo.get_session(event_data['id'], session_type)
+        if not session_data:
+            raise Exception(f"Session not found")
+        
+        return self.repo.get_laps_for_session(session_data['id'], driver)
     
-    def _clean_for_json(self, data: List[Dict]) -> List[Dict]:
+    def get_session_results(
+        self, 
+        season: int, 
+        event: str, 
+        session_type: str = 'R'
+    ) -> List[Dict[str, Any]]:
         """
-        Clean data for JSON serialization.
-        Converts Timedelta, NaT, etc. to serializable types.
+        Get results/standings for a session.
+        
+        Args:
+            season: Year
+            event: Event name
+            session_type: Session type
+        
+        Returns:
+            List of result dictionaries
         """
-        import numpy as np
+        event_data = self.repo.get_event_by_name(season, event)
+        if not event_data:
+            raise Exception(f"Event '{event}' not found")
         
-        cleaned = []
-        for record in data:
-            clean_record = {}
-            for key, value in record.items():
-                # Handle pandas/numpy types
-                if pd.isna(value):
-                    clean_record[key] = None
-                elif isinstance(value, (pd.Timedelta, pd.Timestamp)):
-                    clean_record[key] = str(value)
-                elif isinstance(value, (np.integer, np.floating)):
-                    clean_record[key] = value.item()
-                elif isinstance(value, (int, float, str, bool, type(None))):
-                    clean_record[key] = value
-                else:
-                    clean_record[key] = str(value)
-            cleaned.append(clean_record)
+        session_data = self.repo.get_session(event_data['id'], session_type)
+        if not session_data:
+            raise Exception(f"Session not found")
         
-        return cleaned
+        return self.repo.get_results_for_session(session_data['id'])
+    
+    # ===== DRIVER METHODS =====
+    
+    def get_drivers_in_session(
+        self, 
+        season: int, 
+        event: str, 
+        session_type: str = 'R'
+    ) -> List[str]:
+        """
+        Get list of drivers who participated in a session.
+        
+        Args:
+            season: Year
+            event: Event name
+            session_type: Session type
+        
+        Returns:
+            List of driver codes
+        """
+        event_data = self.repo.get_event_by_name(season, event)
+        if not event_data:
+            return []
+        
+        session_data = self.repo.get_session(event_data['id'], session_type)
+        if not session_data:
+            return []
+        
+        return self.repo.get_drivers_in_session(session_data['id'])
+    
+    # ===== AVAILABILITY METHODS =====
+    
+    def get_available_data(self) -> Dict[str, Any]:
+        """
+        Get complete map of what data is available in cache.
+        
+        This is CRITICAL for the frontend to only show what exists.
+        
+        Returns:
+            Nested availability dictionary
+        """
+        return self.repo.get_available_data()
+    
+    def get_available_sessions_for_event(
+        self, 
+        season: int, 
+        event: str
+    ) -> List[str]:
+        """
+        Get list of available session types for an event.
+        
+        Args:
+            season: Year
+            event: Event name
+        
+        Returns:
+            List of session types (e.g., ['FP1', 'FP2', 'Q', 'R'])
+        """
+        event_data = self.repo.get_event_by_name(season, event)
+        if not event_data:
+            return []
+        
+        sessions = self.repo.get_sessions_for_event(event_data['id'])
+        
+        # Return only sessions that have data
+        return [s['type'] for s in sessions if s['has_data']]
+    
+    # ===== STATISTICS =====
+    
+    def get_database_stats(self) -> Dict[str, Any]:
+        """
+        Get overall cache statistics.
+        
+        Returns:
+            Stats dictionary
+        """
+        return self.repo.get_database_stats()
+    
+    # ===== TELEMETRY PLACEHOLDER =====
+    
+    def get_driver_telemetry(
+        self, 
+        season: int,
+        event: str,
+        session_type: str,
+        driver: str, 
+        lap_number: int
+    ) -> Dict[str, Any]:
+        """
+        Placeholder for telemetry data.
+        
+        NOTE: Telemetry is not stored in cache due to size.
+        This would require loading from FastF1 on-demand or
+        storing in a separate telemetry table/file.
+        
+        For now, returns empty placeholder.
+        """
+        return {
+            'driver': driver,
+            'lap': lap_number,
+            'telemetry': [],
+            'note': 'Telemetry not cached - use FastF1 directly if needed'
+        }

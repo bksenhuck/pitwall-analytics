@@ -155,7 +155,7 @@ env = os.getenv('API_ENV', os.getenv('FLASK_ENV', 'development'))
 
 ---
 
-### 4. **Dependencies** (`requirements-new.txt`)
+### 4. **Dependencies** (`requirements.txt`)
 
 #### Removed:
 ```
@@ -278,7 +278,7 @@ raise HTTPException(status_code=404, detail="Not found")
 
 ### Install Dependencies
 ```powershell
-pip install -r requirements-new.txt
+pip install -r requirements.txt
 ```
 
 ### Run Backend Only
@@ -426,7 +426,7 @@ async def process_data(data: dict):
 
 ### "Module not found: fastapi"
 ```powershell
-pip install -r requirements-new.txt
+pip install -r requirements.txt
 ```
 
 ### "Address already in use"
@@ -458,7 +458,7 @@ uvicorn backend.app:app --reload
 - [x] Converted Flask Blueprints to FastAPI APIRouters
 - [x] Changed all endpoints to `async def`
 - [x] Updated CORS configuration
-- [x] Updated dependencies in `requirements-new.txt`
+- [x] Updated dependencies in `requirements.txt`
 - [x] Updated environment variables
 - [x] Added API documentation endpoints
 - [x] Created async HTTP client example

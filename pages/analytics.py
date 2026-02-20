@@ -15,7 +15,7 @@ layout = html.Div([
     html.Div([
         html.Div([
             html.Label("Season"),
-            dcc.Dropdown(id="season-dropdown", options=[{"label": s, "value": s} for s in data_loader.get_available_seasons()], value=2023),
+            dcc.Dropdown(id="season-dropdown", options=[], placeholder="Select season"),
         ], className="filter"),
 
         html.Div([
@@ -36,7 +36,9 @@ layout = html.Div([
 
     # Stores for session and laps (persist across page refresh in browser tab)
     dcc.Store(id="laps-store", storage_type="session"),
-    dcc.Store(id="session-store", storage_type="session"),
+    dcc.Store(id="session-store", storage_type="session"),  
+    # Trigger to load seasons on page load
+    dcc.Store(id="page-load-trigger", data={"loaded": True}),
 
     html.Div([
         dcc.Graph(id="lap-time-graph"),
@@ -44,6 +46,22 @@ layout = html.Div([
         dcc.Graph(id="speed-telemetry-graph"),
     ], className="charts"),
 ])
+
+
+@dash.callback(
+    Output("season-dropdown", "options"),
+    Output("season-dropdown", "value"),
+    Input("page-load-trigger", "data")
+)
+def load_seasons(_):
+    """Load available seasons from backend cache on page load."""
+    try:
+        seasons = data_loader.get_available_seasons()
+        options = [{"label": s, "value": s} for s in seasons]
+        return options, seasons[-1] if seasons else None  # Default to latest season
+    except Exception as e:
+        print(f"Error loading seasons: {e}")
+        return [], None
 
 
 @dash.callback(Output("race-dropdown", "options"), Input("season-dropdown", "value"))

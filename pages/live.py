@@ -23,7 +23,7 @@ layout = html.Div([
     html.Div([
         layout_card(
             "Season",
-            dcc.Dropdown(id="live-season", options=[{"label": s, "value": s} for s in data_loader.get_available_seasons()], value=2023),
+            dcc.Dropdown(id="live-season", options=[], placeholder="Select season"),
         ),
         layout_card("Race", dcc.Dropdown(id="live-race", options=[], placeholder="Select race")),
         layout_card("Driver (highlight)", dcc.Dropdown(id="live-highlight", options=[], placeholder="Optional")),
@@ -33,6 +33,8 @@ layout = html.Div([
     # Stores: telemetry per driver
     dcc.Store(id="live-telemetry-store", storage_type="session"),
     dcc.Store(id="live-drivers-store", storage_type="session"),
+    # Trigger to load seasons on page load
+    dcc.Store(id="live-page-load-trigger", data={"loaded": True}),
 
     # Interval to animate
     dcc.Interval(id="live-interval", interval=1000, n_intervals=0, disabled=True),
@@ -41,6 +43,22 @@ layout = html.Div([
         dcc.Graph(id="live-map", config={"displayModeBar": False}),
     ], className="charts"),
 ])
+
+
+@dash.callback(
+    Output("live-season", "options"),
+    Output("live-season", "value"),
+    Input("live-page-load-trigger", "data")
+)
+def load_live_seasons(_):
+    """Load available seasons from backend cache on page load."""
+    try:
+        seasons = data_loader.get_available_seasons()
+        options = [{"label": s, "value": s} for s in seasons]
+        return options, seasons[-1] if seasons else None
+    except Exception as e:
+        print(f"Error loading seasons in live page: {e}")
+        return [], None
 
 
 @dash.callback(Output("live-race", "options"), Input("live-season", "value"))

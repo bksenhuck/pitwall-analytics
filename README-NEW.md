@@ -71,7 +71,7 @@ pitwall-analytics/
 │
 ├── .env                        # Environment variables (local)
 ├── .env.example                # Environment template
-├── requirements-new.txt        # Python dependencies
+├── requirements.txt            # Python dependencies
 ├── run.py                      # Development server launcher
 ├── ARCHITECTURE.md             # Detailed architecture docs
 └── README-NEW.md               # This file
@@ -109,7 +109,7 @@ pitwall-analytics/
 
 4. **Install dependencies**
    ```powershell
-   pip install -r requirements-new.txt
+   pip install -r requirements.txt
    ```
 
 5. **Configure environment**
@@ -335,8 +335,8 @@ FROM python:3.11
 WORKDIR /app
 COPY backend/ ./backend/
 COPY shared/ ./shared/
-COPY requirements-new.txt .
-RUN pip install -r requirements-new.txt
+COPY requirements.txt .
+RUN pip install -r requirements.txt
 CMD ["python", "-m", "backend.app"]
 ```
 
@@ -346,8 +346,8 @@ FROM python:3.11
 WORKDIR /app
 COPY frontend/ ./frontend/
 COPY shared/ ./shared/
-COPY requirements-new.txt .
-RUN pip install -r requirements-new.txt
+COPY requirements.txt .
+RUN pip install -r requirements.txt
 CMD ["python", "-m", "frontend.app"]
 ```
 

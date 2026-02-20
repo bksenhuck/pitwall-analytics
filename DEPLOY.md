@@ -53,7 +53,7 @@ ou: uvicorn main:app --host 0.0.0.0 --port $PORT
    ```
    Name: pitwall-analytics
    Environment: Python 3
-   Build Command: pip install -r requirements-new.txt
+   Build Command: pip install -r requirements.txt
    Start Command: uvicorn main:app --host 0.0.0.0 --port $PORT
    ```
 
@@ -169,8 +169,8 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Instalar dependências
-COPY requirements-new.txt .
-RUN pip install --no-cache-dir -r requirements-new.txt
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copiar código
 COPY . .
@@ -245,7 +245,7 @@ CORS_ORIGINS=["*"]
 ### Antes do Deploy
 
 - [ ] Código no GitHub/GitLab
-- [ ] `requirements-new.txt` atualizado
+- [ ] `requirements.txt` atualizado
 - [ ] `main.py` criado (servidor unificado)
 - [ ] `Procfile` criado
 - [ ] `render.yaml` criado (opcional)
@@ -253,7 +253,7 @@ CORS_ORIGINS=["*"]
 
 ### Configurar na Plataforma
 
-- [ ] Build command: `pip install -r requirements-new.txt`
+- [ ] Build command: `pip install -r requirements.txt`
 - [ ] Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
 - [ ] Variáveis de ambiente configuradas
 - [ ] Health check: `/api/health`
@@ -308,11 +308,11 @@ https://pitwall-analytics.onrender.com/api/cached/data?key=f1_seasons → Cache
 
 ### Dependências não instalam
 
-**Causa:** `requirements-new.txt` com erro ou versões incompatíveis
+**Causa:** `requirements.txt` com erro ou versões incompatíveis
 
 **Solução:**
 ```bash
-pip freeze > requirements-new.txt  # Gerar novamente
+pip freeze > requirements.txt  # Gerar novamente
 ```
 
 ---

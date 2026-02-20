@@ -33,11 +33,11 @@ Write-Host "[CONFIG] Ativando ambiente virtual..." -ForegroundColor Yellow
 
 # Verificar se requirements estao instalados
 Write-Host "[CONFIG] Verificando dependencias..." -ForegroundColor Yellow
-if (-not (Test-Path "requirements-new.txt")) {
-    Write-Host "[AVISO] Arquivo requirements-new.txt nao encontrado!" -ForegroundColor Yellow
+if (-not (Test-Path "requirements.txt")) {
+    Write-Host "[AVISO] Arquivo requirements.txt nao encontrado!" -ForegroundColor Yellow
 } else {
     Write-Host "Instalando/Atualizando dependencias..." -ForegroundColor Gray
-    pip install -r requirements-new.txt -q
+    pip install -r requirements.txt -q
 }
 
 Write-Host ""

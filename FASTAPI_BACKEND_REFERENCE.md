@@ -361,7 +361,7 @@ CORS_ORIGINS=http://localhost:8050,http://127.0.0.1:8050
 ### Backend won't start
 ```powershell
 # Check dependencies
-pip install -r requirements-new.txt
+pip install -r requirements.txt
 
 # Check port availability
 netstat -ano | findstr :5000

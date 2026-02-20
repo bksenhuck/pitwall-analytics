@@ -4,7 +4,7 @@
 
 ### Step 1: Install Dependencies
 ```powershell
-pip install -r requirements-new.txt
+pip install -r requirements.txt
 ```
 
 ### Step 2: Run the App
@@ -93,7 +93,7 @@ curl "http://127.0.0.1:5000/api/data/session?season=2023&event=Monaco"
 | `backend/services/f1_data_service.py` | Business logic |
 | `frontend/pages/analytics.py` | Main analytics page |
 | `.env` | Configuration |
-| `requirements-new.txt` | Dependencies |
+| `requirements.txt` | Dependencies |
 
 ---
 

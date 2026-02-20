@@ -68,7 +68,7 @@ pitwall-analytics/
 ├── charts.py               # Gráficos Plotly
 │
 ├── .env                    # Configurações (portas, cache, etc)
-├── requirements-new.txt    # Dependências Python
+├── requirements.txt        # Dependências Python
 │
 ├── COMO_EXECUTAR.md       # Guia detalhado (este arquivo)
 ├── start.ps1               # Script de inicialização
@@ -175,7 +175,7 @@ taskkill /PID <PID> /F
 ### "Module not found"
 
 ```powershell
-pip install -r requirements-new.txt
+pip install -r requirements.txt
 ```
 
 ### Backend não conecta

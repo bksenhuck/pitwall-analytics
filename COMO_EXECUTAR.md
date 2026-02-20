@@ -18,7 +18,7 @@ cd C:\Users\ksenh\Documents\projects\pitwall-analytics
 
 ```powershell
 cd pitwall-analytics
-pip install -r requirements-new.txt
+pip install -r requirements.txt
 ```
 
 ---
@@ -194,7 +194,7 @@ taskkill /PID <PID> /F
 
 ```powershell
 # Reinstalar dependências
-pip install -r requirements-new.txt
+pip install -r requirements.txt
 ```
 
 ### Erro: "Cannot connect to backend"

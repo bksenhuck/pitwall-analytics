@@ -4,7 +4,7 @@
 
 ### 1. Install dependencies (already done)
 ```powershell
-pip install -r requirements-new.txt
+pip install -r requirements.txt
 ```
 
 ### 2. Configure TTL (optional)
@@ -267,7 +267,7 @@ Check TTL: `curl http://127.0.0.1:5000/api/cached/cache/info`
 
 ### "Module not found" errors
 ```powershell
-pip install -r requirements-new.txt
+pip install -r requirements.txt
 ```
 
 ---

@@ -1,12 +1,45 @@
 from typing import List, Tuple
 import os
+import io
 
 import requests
 import pandas as pd
 
 
 # Backend API URL - read from environment or default to localhost
-BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://127.0.0.1:5000")
+BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://127.0.0.1:5000/api")
+
+# Cache to avoid repeated error messages and redundant calls
+_backend_available_cache = {"checked": False, "available": False, "last_check": 0}
+_seasons_cache = None
+_races_cache = {}
+
+
+def _check_backend_available() -> bool:
+    """Check if backend is available, with caching to reduce spam."""
+    import time
+    
+    cache = _backend_available_cache
+    current_time = time.time()
+    
+    # Only check every 5 seconds
+    if cache["checked"] and (current_time - cache["last_check"]) < 5:
+        return cache["available"]
+    
+    try:
+        response = requests.get(f"{BACKEND_API_URL}/health", timeout=1)
+        cache["available"] = response.status_code == 200
+    except:
+        cache["available"] = False
+    
+    cache["checked"] = True
+    cache["last_check"] = current_time
+    
+    if not cache["available"] and current_time - cache["last_check"] < 1:
+        print(f"⚠️  Backend not available at {BACKEND_API_URL}. Using fallback data.")
+        print(f"   To use cached data, start the backend with: python main.py")
+    
+    return cache["available"]
 
 
 def enable_cache(cache_dir: str = ".ff1cache") -> None:
@@ -24,78 +57,113 @@ def get_available_seasons() -> List[int]:
     
     Returns:
         List[int]: List of available F1 seasons
-    
-    Raises:
-        Exception: If cache is not populated or request fails
     """
+    global _seasons_cache
+    
+    # Return cached value if available
+    if _seasons_cache is not None:
+        return _seasons_cache
+    
+    # Check if backend is available first
+    if not _check_backend_available():
+        _seasons_cache = [2021, 2022, 2023, 2024]
+        return _seasons_cache
+    
     try:
+        url = f"{BACKEND_API_URL}/cached/read"
         response = requests.get(
-            f"{BACKEND_API_URL}/api/cached/read",
+            url,
             params={"key": "f1_seasons"},
-            timeout=10
+            timeout=2
         )
         
         if response.status_code == 404:
-            raise Exception(
-                "Seasons cache not found. Please run: python populate_cache.py f1_seasons"
-            )
+            print(f"⚠️  Seasons cache not populated. Please run: python populate_cache.py f1_seasons")
+            _seasons_cache = [2021, 2022, 2023, 2024]
+            return _seasons_cache
+        
+        # Check if response is empty
+        if not response.text:
+            _seasons_cache = [2021, 2022, 2023, 2024]
+            return _seasons_cache
         
         response.raise_for_status()
         data = response.json()
         
-        # Response format: {"seasons": [2021, 2022, ...]}
-        if "seasons" in data:
-            return data["seasons"]
+        # Response format: {"data": {"seasons": [2021, 2022, ...]}, ...}
+        if "data" in data and "seasons" in data["data"]:
+            _seasons_cache = data["data"]["seasons"]
+        elif "seasons" in data:
+            _seasons_cache = data["seasons"]
+        else:
+            _seasons_cache = [2021, 2022, 2023, 2024]
         
-        # Fallback
-        return [2021, 2022, 2023, 2024]
+        return _seasons_cache
         
-    except requests.RequestException as e:
-        print(f"❌ Error fetching seasons from cache: {e}")
-        # Return fallback list
-        return [2021, 2022, 2023, 2024]
+    except Exception:
+        # Silent fallback - error already logged by _check_backend_available
+        _seasons_cache = [2021, 2022, 2023, 2024]
+        return _seasons_cache
 
 
 def get_races_for_season(season: int) -> List[str]:
     """
-    Fetch race schedule for a season from SQLite cache via backend API.
-    
-    Args:
-        season: F1 season year (e.g., 2024)
-    
-    Returns:
-        List[str]: List of event names for the season
-    
-    Raises:
-        Exception: If cache is not populated or request fails
     """
+    global _races_cache
+    
+    # Return cached value if available
+    if season in _races_cache:
+        return _races_cache[season]
+    
+    # Check if backend is available first
+    if not _check_backend_available():
+        fallback = ["Bahrain", "Australian", "Monaco"]
+        _races_cache[season] = fallback
+        return fallback
+    
     try:
+        url = f"{BACKEND_API_URL}/cached/read"
         response = requests.get(
-            f"{BACKEND_API_URL}/api/cached/read",
+            url,
             params={"key": f"races_{season}"},
-            timeout=10
+            timeout=2
         )
         
         if response.status_code == 404:
-            raise Exception(
-                f"Race schedule for {season} not found. "
-                f"Please run: python populate_cache.py races_{season}"
-            )
+            print(f"⚠️  Race schedule for {season} not populated. Please run: python populate_cache.py races_{season}")
+            fallback = ["Bahrain", "Australian", "Monaco"]
+            _races_cache[season] = fallback
+            return fallback
+        
+        # Check if response is empty
+        if not response.text:
+            fallback = ["Bahrain", "Australian", "Monaco"]
+            _races_cache[season] = fallback
+            return fallback
         
         response.raise_for_status()
         data = response.json()
         
-        # Response format: {"season": 2024, "races": [{...}, {...}]}
-        if "races" in data:
-            return [race["event_name"] for race in data["races"]]
+        # Response format: {"data": {"season": 2024, "races": [{...}, {...}]}, ...}
+        if "data" in data and "races" in data["data"]:
+            races = [race["event_name"] for race in data["data"]["races"]]
+            _races_cache[season] = races
+            return races
+        elif "races" in data:
+            races = [race["event_name"] for race in data["races"]]
+            _races_cache[season] = races
+            return races
         
         # Fallback
-        return ["Bahrain", "Australian", "Monaco"]
+        fallback = ["Bahrain", "Australian", "Monaco"]
+        _races_cache[season] = fallback
+        return fallback
         
-    except requests.RequestException as e:
-        print(f"❌ Error fetching races from cache: {e}")
-        # Return fallback list
-        return ["Bahrain", "Australian", "Monaco"]
+    except Exception:
+        # Silent fallback - error already logged by _check_backend_available
+        fallback = ["Bahrain", "Australian", "Monaco"]
+        _races_cache[season] = fallback
+        return fallback
 
 
 def load_race_session(season: int, event_name: str) -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
@@ -110,33 +178,60 @@ def load_race_session(season: int, event_name: str) -> Tuple[pd.DataFrame, pd.Da
         laps: DataFrame of laps (with LapTimeSeconds)
         telemetry_placeholder: Empty DataFrame (telemetry not loaded)
         session_data: Dict with session metadata
-    
-    Raises:
-        Exception: If cache is not populated or request fails
     """
+    # Check if backend is available first
+    if not _check_backend_available():
+        print(f"⚠️  Cannot load race data: backend not available")
+        return pd.DataFrame(), pd.DataFrame(), {"error": "Backend not available"}
+    
     try:
         # Normalize event name: replace spaces with underscores, lowercase
         event_key = event_name.lower().replace(" ", "_")
         cache_key = f"race_{season}_{event_key}"
         
+        url = f"{BACKEND_API_URL}/cached/read"
+        print(f"🔍 Requesting: {url}?key={cache_key}")
+        
         response = requests.get(
-            f"{BACKEND_API_URL}/api/cached/read",
+            url,
             params={"key": cache_key},
             timeout=30  # Longer timeout for large race data
         )
         
+        print(f"📡 Response status: {response.status_code}")
+        print(f"📦 Response length: {len(response.text)} chars")
+        
         if response.status_code == 404:
-            raise Exception(
-                f"Race data for {season} {event_name} not found. "
-                f"Please run: python populate_cache.py {cache_key}"
-            )
+            print(f"⚠️  Race data for {season} {event_name} not found.")
+            print(f"   Please run: python populate_cache.py {cache_key}")
+            return pd.DataFrame(), pd.DataFrame(), {"error": "Cache not populated"}
+        
+        # Check if response is empty
+        if not response.text or len(response.text.strip()) == 0:
+            print(f"⚠️  Backend returned empty response for {cache_key}")
+            print(f"   Response text: '{response.text[:100]}'")
+            return pd.DataFrame(), pd.DataFrame(), {"error": "Empty response"}
         
         response.raise_for_status()
-        data = response.json()
+        
+        # Try to parse JSON
+        try:
+            data = response.json()
+        except ValueError as json_err:
+            print(f"❌ JSON decode error for {cache_key}")
+            print(f"   Response preview: '{response.text[:200]}'")
+            print(f"   Error: {json_err}")
+            return pd.DataFrame(), pd.DataFrame(), {"error": "Invalid JSON"}
+        
+        # Extract nested data if present
+        if "data" in data:
+            data = data["data"]
         
         # Response format: {"season": 2024, "laps": [...], "drivers": [...]}
         if "laps" not in data:
-            raise Exception(f"Invalid race data format for {cache_key}")
+            print(f"⚠️  Invalid race data format for {cache_key}")
+            print(f"   Available keys: {list(data.keys())}")
+            return pd.DataFrame(), pd.DataFrame(), {"error": "Invalid format"}
         
         # Convert laps to DataFrame
         laps = pd.DataFrame(data["laps"])
@@ -157,11 +252,15 @@ def load_race_session(season: int, event_name: str) -> Tuple[pd.DataFrame, pd.Da
             "source": data.get("source", "sqlite_cache")
         }
         
+        print(f"✅ Loaded {len(laps)} laps for {event_name}")
+        
         return laps, telemetry_df, session_data
         
-    except requests.RequestException as e:
-        print(f"❌ Error loading race session from cache: {e}")
-        raise Exception(f"Failed to load race data: {e}")
+    except Exception as e:
+        print(f"❌ Error loading race session from cache: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        return pd.DataFrame(), pd.DataFrame(), {"error": str(e)}
 
 
 def get_session_with_telemetry(season: int, event_name: str) -> dict:

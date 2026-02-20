@@ -1,6 +1,7 @@
 import dash
 from dash import html, dcc, Input, Output, State
 import pandas as pd
+import io
 # removed datetime import (not needed after removing update timestamp)
 
 from charts import lap_time_chart, position_chart, speed_telemetry_chart
@@ -96,7 +97,7 @@ def handle_load(load_n: int, season: int, race: str):
 def update_drivers(laps_json: str):
     if not laps_json:
         return []
-    laps = pd.read_json(laps_json, orient="split")
+    laps = pd.read_json(io.StringIO(laps_json), orient="split")
     drivers = laps["Driver"].unique().tolist() if "Driver" in laps.columns else []
     return [{"label": d, "value": d} for d in drivers]
 
@@ -115,7 +116,7 @@ def update_charts(driver: str, laps_json: str, session_meta: dict):
     if not laps_json:
         return empty_fig, empty_fig, empty_fig
 
-    laps = pd.read_json(laps_json, orient="split")
+    laps = pd.read_json(io.StringIO(laps_json), orient="split")
     lap_fig = lap_time_chart(laps, driver)
     pos_fig = position_chart(laps, driver)
 

@@ -6,6 +6,7 @@ Can be run standalone (development) or mounted in main.py (production).
 """
 import dash
 from dash import html
+from pathlib import Path
 from frontend.config import APP_TITLE, HOST, PORT, DEBUG, CACHE_DIR
 from frontend.api import client
 
@@ -20,11 +21,16 @@ def create_app():
     # Initialize cache
     client.enable_cache(str(CACHE_DIR))
     
+    # Get project root and assets folder
+    project_root = Path(__file__).parent.parent
+    assets_folder = project_root / "assets"
+    
     # Create Dash app with multi-page support
     app = dash.Dash(
         __name__,
         use_pages=True,
         pages_folder="pages",  # Relative to frontend/ directory
+        assets_folder=str(assets_folder),  # Point to project root assets/
         suppress_callback_exceptions=True,
         title=APP_TITLE
     )

@@ -244,6 +244,32 @@ class F1DataService:
             'sample_count': len(samples)
         }
 
+    # ===== TRACK LAYOUT =====
+
+    def get_track_layout(
+        self,
+        season: int,
+        event: str,
+        session_type: str = 'R'
+    ) -> Dict[str, Any]:
+        """
+        Get X/Y circuit layout from the fastest lap's telemetry.
+        Returns empty arrays if telemetry is not populated.
+        """
+        event_data = self.repo.get_event_by_name(season, event)
+        if not event_data:
+            return {"x": [], "y": [], "count": 0}
+
+        session_data = self.repo.get_session(
+            season, event_data['id'], session_type
+        )
+        if not session_data:
+            return {"x": [], "y": [], "count": 0}
+
+        return self.repo.get_track_layout_samples(
+            season, session_data['id']
+        )
+
     # ===== AVAILABILITY METHODS =====
 
     def get_available_data(self) -> Dict[str, Any]:

@@ -96,10 +96,35 @@ def get_available_seasons() -> List[int]:
         return _seasons_cache
 
 
+def get_track_layout(
+    season: int, event: str, session_type: str = 'R'
+) -> dict:
+    """
+    Fetch circuit X/Y layout from fastest lap telemetry.
+    Returns {"x": [...], "y": [...], "count": N}.
+    Empty arrays if telemetry was not populated.
+    """
+    if not _check_backend_available():
+        return {"x": [], "y": [], "count": 0}
+    try:
+        response = requests.get(
+            f"{BACKEND_API_URL}/data/track-layout",
+            params={"season": season, "event": event,
+                    "session_type": session_type},
+            timeout=10
+        )
+        if response.status_code != 200:
+            return {"x": [], "y": [], "count": 0}
+        return response.json()
+    except Exception as e:
+        print(f"❌ Error loading track layout: {e}")
+        return {"x": [], "y": [], "count": 0}
+
+
 def get_races_for_season(season: int) -> List[str]:
     """
     Fetch available races for a season from SQLite cache.
-    
+
     Returns:
         List[str]: List of race event names in cache
     """

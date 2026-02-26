@@ -371,6 +371,99 @@ body {
   font-size: 1.1rem;
 }
 
+/* ---- Live race page ------------------------------------- */
+.live-body {
+  display: flex;
+  gap: 1rem;
+  align-items: stretch;
+  min-height: 540px;
+  margin-bottom: 1rem;
+}
+
+.live-standings {
+  width: 210px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: .75rem;
+  overflow-y: auto;
+  max-height: 560px;
+}
+
+.live-map {
+  flex: 1;
+  background: #0A0A14;
+  border-radius: var(--radius);
+  overflow: hidden;
+  min-height: 520px;
+}
+
+.live-slider-panel {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: .9rem 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 1rem;
+}
+
+.live-lap-label {
+  font-weight: 700;
+  color: var(--primary);
+  font-size: .9rem;
+  white-space: nowrap;
+  min-width: 100px;
+}
+
+.live-slider-input {
+  flex: 1;
+}
+
+/* Standing rows */
+.standing-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: .82rem;
+}
+
+.standing-row:last-child { border-bottom: none; }
+
+.srow-pos {
+  font-weight: 800;
+  color: var(--primary);
+  min-width: 18px;
+  font-size: .78rem;
+}
+
+.srow-info {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+
+.srow-code {
+  font-weight: 700;
+  font-family: monospace;
+  font-size: .88rem;
+}
+
+.srow-time {
+  font-size: .72rem;
+  color: var(--muted);
+  font-family: monospace;
+}
+
+.srow-gap {
+  font-size: .68rem;
+  color: var(--muted);
+}
+
 /* ---- Utility -------------------------------------------- */
 .mt-1 { margin-top: .5rem; }
 .mt-2 { margin-top: 1rem; }

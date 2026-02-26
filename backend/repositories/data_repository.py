@@ -459,6 +459,49 @@ class DataRepository:
 
         return result
 
+    # ===== TRACK LAYOUT METHODS =====
+
+    @staticmethod
+    def get_track_layout_samples(
+        season: int, session_id: int
+    ) -> Dict[str, Any]:
+        """
+        Get X/Y telemetry from the fastest accurate lap in a session.
+        Used to draw the circuit outline.
+        """
+        with get_db_connection(season) as conn:
+            cursor = conn.cursor()
+
+            # Fastest accurate non-formation lap
+            cursor.execute("""
+                SELECT id FROM laps
+                WHERE session_id = ?
+                  AND lap_time_seconds IS NOT NULL
+                  AND is_accurate = 1
+                  AND lap_number > 1
+                ORDER BY lap_time_seconds ASC
+                LIMIT 1
+            """, (session_id,))
+            row = cursor.fetchone()
+
+            if not row:
+                return {"x": [], "y": [], "count": 0}
+
+            lap_id = row['id']
+
+            cursor.execute("""
+                SELECT x, y FROM telemetry
+                WHERE lap_id = ?
+                ORDER BY session_time_seconds
+            """, (lap_id,))
+            rows = cursor.fetchall()
+
+            return {
+                "x": [r['x'] for r in rows],
+                "y": [r['y'] for r in rows],
+                "count": len(rows)
+            }
+
     # ===== UTILITY METHODS =====
 
     @staticmethod

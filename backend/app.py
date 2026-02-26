@@ -67,10 +67,13 @@ def create_app() -> FastAPI:
         init_cache(config.CACHE_DIR, config.CACHE_ENABLED)
         print("✅ FastF1 cache initialized")
         
-        # Initialize SQLite database (normalized schema)
-        from backend.db.session import init_database
-        init_database()
-        print("✅ SQLite normalized cache database initialized")
+        # DBs are created per-season by populate_cache.py
+        from backend.db.session import get_available_season_dbs
+        seasons = get_available_season_dbs()
+        if seasons:
+            print(f"✅ Found season DBs: {seasons}")
+        else:
+            print("⚠️  No season DBs found. Run populate_cache.py first.")
     
     return app
 

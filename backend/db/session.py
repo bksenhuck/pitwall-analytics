@@ -1,17 +1,15 @@
 """
-Database session management - Normalized Schema.
+Database session management - Per-Season Normalized Schema.
 
-SQLite database with normalized tables for F1 data:
-- Better query performance (10-100x faster than JSON blobs)
-- Data integrity with foreign keys
-- Easier to query and join
-- Reduced storage (no JSON redundancy)
+Each season gets its own SQLite file: data/pitwall_{year}.db
+This keeps individual files manageable even with telemetry (~3-5 GB/season).
 
-Schema:
-- seasons: Available F1 seasons
-- events: GPs/races for each season
+Schema per DB:
+- seasons: Season metadata (one row per DB)
+- events: GPs/races for the season
 - sessions: Session data (FP1, FP2, Q, R, etc.) for each event
 - laps: Individual lap data per session
+- telemetry: Car + position telemetry per lap (X, Y, Z, speed, throttle, etc.)
 - results: Race/session results
 - weather: Weather conditions per session
 - race_control_messages: Race control messages
@@ -20,7 +18,7 @@ Schema:
 import sqlite3
 from pathlib import Path
 from contextlib import contextmanager
-from typing import Generator
+from typing import Generator, List
 import os
 from dotenv import load_dotenv
 
@@ -28,31 +26,53 @@ load_dotenv()
 
 # Database configuration
 DB_DIR = Path(os.getenv('DB_DIR', 'data'))
-DB_NAME = os.getenv('DB_NAME', 'pitwall_cache.db')
-DB_PATH = DB_DIR / DB_NAME
+
+
+def get_db_path(season: int) -> Path:
+    """Return the path for a season-specific database file."""
+    return DB_DIR / f"pitwall_{season}.db"
 
 
 @contextmanager
-def get_db_connection() -> Generator[sqlite3.Connection, None, None]:
-    """Create database connection with row factory."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row  # Enable dict-like access
+def get_db_connection(season: int) -> Generator[sqlite3.Connection, None, None]:
+    """Create database connection for a specific season's DB."""
+    conn = sqlite3.connect(get_db_path(season))
+    conn.row_factory = sqlite3.Row
     try:
         yield conn
     finally:
         conn.close()
 
 
-def init_database():
+def get_available_season_dbs() -> List[int]:
     """
-    Initialize database with normalized schema.
-    Called on application startup.
+    Scan the data directory for existing season database files.
+
+    Returns:
+        List of season years (descending) for which a pitwall_{year}.db exists.
+    """
+    if not DB_DIR.exists():
+        return []
+    seasons = []
+    for f in DB_DIR.glob("pitwall_*.db"):
+        try:
+            year = int(f.stem.split("_")[1])
+            seasons.append(year)
+        except (IndexError, ValueError):
+            pass
+    return sorted(seasons, reverse=True)
+
+
+def init_database(season: int):
+    """
+    Initialize the database for a given season with the normalized schema.
+    Called by populate_cache.py before writing data for a season.
     """
     DB_DIR.mkdir(parents=True, exist_ok=True)
-    
-    with get_db_connection() as conn:
+
+    with get_db_connection(season) as conn:
         cursor = conn.cursor()
-        
+
         # ===== SEASONS TABLE =====
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS seasons (
@@ -61,7 +81,7 @@ def init_database():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
         # ===== EVENTS TABLE =====
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS events (
@@ -72,45 +92,45 @@ def init_database():
                 location TEXT,
                 country TEXT,
                 event_date DATE,
-                event_format TEXT,  -- 'conventional', 'sprint'
+                event_format TEXT,
                 last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                
+
                 FOREIGN KEY (season) REFERENCES seasons(season),
                 UNIQUE(season, round_number),
                 UNIQUE(season, event_name)
             )
         """)
-        
+
         cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_events_season 
+            CREATE INDEX IF NOT EXISTS idx_events_season
             ON events(season)
         """)
-        
+
         # ===== SESSIONS TABLE =====
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 event_id INTEGER NOT NULL,
-                session_type TEXT NOT NULL,  -- 'FP1', 'FP2', 'FP3', 'Q', 'S', 'SQ', 'R'
+                session_type TEXT NOT NULL,
                 session_name TEXT,
                 session_date TIMESTAMP,
                 track_length REAL,
                 total_laps INTEGER,
-                has_data BOOLEAN DEFAULT 0,  -- Flag if data was successfully loaded
+                has_data BOOLEAN DEFAULT 0,
                 last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                
+
                 FOREIGN KEY (event_id) REFERENCES events(id),
                 UNIQUE(event_id, session_type)
             )
         """)
-        
+
         cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_sessions_event 
+            CREATE INDEX IF NOT EXISTS idx_sessions_event
             ON sessions(event_id)
         """)
-        
+
         # ===== LAPS TABLE =====
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS laps (
@@ -132,7 +152,7 @@ def init_database():
                 is_accurate BOOLEAN,
                 pit_out_time TIMESTAMP,
                 pit_in_time TIMESTAMP,
-                compound TEXT,  -- Tyre compound
+                compound TEXT,
                 tyre_life INTEGER,
                 fresh_tyre BOOLEAN,
                 stint INTEGER,
@@ -140,22 +160,48 @@ def init_database():
                 position REAL,
                 deleted BOOLEAN DEFAULT 0,
                 deleted_reason TEXT,
-                
+
                 FOREIGN KEY (session_id) REFERENCES sessions(id),
                 UNIQUE(session_id, driver_number, lap_number)
             )
         """)
-        
+
         cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_laps_session 
+            CREATE INDEX IF NOT EXISTS idx_laps_session
             ON laps(session_id)
         """)
-        
+
         cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_laps_driver 
+            CREATE INDEX IF NOT EXISTS idx_laps_driver
             ON laps(session_id, driver_number)
         """)
-        
+
+        # ===== TELEMETRY TABLE =====
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS telemetry (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                lap_id INTEGER NOT NULL,
+                session_time_seconds REAL,
+                speed REAL,
+                rpm INTEGER,
+                gear INTEGER,
+                throttle REAL,
+                brake BOOLEAN,
+                drs INTEGER,
+                x REAL,
+                y REAL,
+                z REAL,
+                source TEXT,
+
+                FOREIGN KEY (lap_id) REFERENCES laps(id)
+            )
+        """)
+
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_telemetry_lap
+            ON telemetry(lap_id)
+        """)
+
         # ===== RESULTS TABLE =====
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS results (
@@ -172,17 +218,17 @@ def init_database():
                 time_seconds REAL,
                 fastest_lap_time_seconds REAL,
                 fastest_lap_number INTEGER,
-                
+
                 FOREIGN KEY (session_id) REFERENCES sessions(id),
                 UNIQUE(session_id, driver_number)
             )
         """)
-        
+
         cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_results_session 
+            CREATE INDEX IF NOT EXISTS idx_results_session
             ON results(session_id)
         """)
-        
+
         # ===== WEATHER TABLE =====
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS weather (
@@ -196,17 +242,17 @@ def init_database():
                 wind_speed REAL,
                 wind_direction INTEGER,
                 rainfall BOOLEAN,
-                
+
                 FOREIGN KEY (session_id) REFERENCES sessions(id),
                 UNIQUE(session_id, time_seconds)
             )
         """)
-        
+
         cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_weather_session 
+            CREATE INDEX IF NOT EXISTS idx_weather_session
             ON weather(session_id)
         """)
-        
+
         # ===== RACE CONTROL MESSAGES TABLE =====
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS race_control_messages (
@@ -220,35 +266,35 @@ def init_database():
                 scope TEXT,
                 sector INTEGER,
                 driver_number TEXT,
-                
+
                 FOREIGN KEY (session_id) REFERENCES sessions(id)
             )
         """)
-        
+
         cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_race_control_session 
+            CREATE INDEX IF NOT EXISTS idx_race_control_session
             ON race_control_messages(session_id)
         """)
-        
+
         # ===== SESSION STATUS TABLE =====
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS session_status (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id INTEGER NOT NULL,
                 time_seconds REAL NOT NULL,
-                status TEXT,  -- 'AllClear', 'Yellow', 'SCDeployed', 'VSCDeployed', 'Red', etc.
-                
+                status TEXT,
+
                 FOREIGN KEY (session_id) REFERENCES sessions(id),
                 UNIQUE(session_id, time_seconds)
             )
         """)
-        
+
         cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_session_status 
+            CREATE INDEX IF NOT EXISTS idx_session_status
             ON session_status(session_id)
         """)
-        
-        # ===== METADATA TABLE (for migration tracking, version, etc.) =====
+
+        # ===== METADATA TABLE =====
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS metadata (
                 key TEXT PRIMARY KEY,
@@ -256,26 +302,19 @@ def init_database():
                 last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
-        # Set schema version
+
         cursor.execute("""
             INSERT OR REPLACE INTO metadata (key, value)
-            VALUES ('schema_version', '2.0')
+            VALUES ('schema_version', '3.0')
         """)
-        
+
         conn.commit()
-        print(f"✅ Normalized database initialized: {DB_PATH}")
+        print(f"✅ Database initialized: {get_db_path(season)}")
 
 
 if __name__ == "__main__":
-    init_database()
-    print("\n📊 Schema version 2.0 - Normalized tables:")
-    print("  - seasons")
-    print("  - events")
-    print("  - sessions")
-    print("  - laps")
-    print("  - results")
-    print("  - weather")
-    print("  - race_control_messages")
-    print("  - session_status")
-    print("  - metadata")
+    import sys
+    if len(sys.argv) != 2:
+        print("Usage: python session.py <season>")
+        sys.exit(1)
+    init_database(int(sys.argv[1]))

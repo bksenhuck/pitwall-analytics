@@ -1,8 +1,5 @@
-"""Live page - Real-time race simulation (limited without telemetry in cache)"""
-import math
-import json
+"""Live page - Race session visualization"""
 import io
-from typing import Dict, Any
 
 import dash
 from dash import html, dcc, Input, Output, State
@@ -14,27 +11,63 @@ from frontend.api import client
 dash.register_page(__name__, path="/live", name="Live")
 
 
-def layout_card(label: str, component: Any):
+def _filter_card(label, component):
     return html.Div([html.Label(label), component], className="filter")
 
 
 layout = html.Div([
-    html.H2("🏁 Live Race (Beta)"),
-    
     html.Div([
-        html.Strong("⚠️ Note: "),
-        html.P("Telemetry data is not stored in cache. This page has limited functionality."),
-    ], style={"padding": "10px", "background": "#fff3e0", "borderRadius": "5px", "margin": "10px 0"}),
-
-    html.Div([
-        layout_card(
-            "Season",
-            dcc.Dropdown(id="live-season", options=[], placeholder="Select season"),
+        html.H1("Live", className="page-title"),
+        html.P(
+            "Carregue uma corrida e acompanhe a evolução de posições "
+            "volta a volta.",
+            className="page-subtitle",
         ),
-        layout_card("Race", dcc.Dropdown(id="live-race", options=[], placeholder="Select race")),
-        layout_card("Driver", dcc.Dropdown(id="live-driver", options=[], placeholder="Select driver")),
+    ]),
+
+    # Info banner (subtle, no inline styles)
+    html.Div([
+        html.Span("ℹ", className="alert-icon"),
+        html.Span(
+            "Dados de telemetria GPS não estão no cache atual. "
+            "A visualização de mapa de circuito está planejada para "
+            "versões futuras."
+        ),
+    ], className="alert alert-info"),
+
+    # ── Filters ────────────────────────────────────────────────
+    html.Div([
+        _filter_card(
+            "Temporada",
+            dcc.Dropdown(
+                id="live-season",
+                options=[],
+                placeholder="Selecione a temporada",
+            ),
+        ),
+        _filter_card(
+            "Corrida",
+            dcc.Dropdown(
+                id="live-race",
+                options=[],
+                placeholder="Selecione a corrida",
+            ),
+        ),
+        _filter_card(
+            "Piloto",
+            dcc.Dropdown(
+                id="live-driver",
+                options=[],
+                placeholder="Selecione o piloto",
+            ),
+        ),
         html.Div([
-            html.Button("Load Session", id="live-load", n_clicks=0, className="btn-primary")
+            html.Button(
+                "Carregar sessão",
+                id="live-load",
+                n_clicks=0,
+                className="btn-primary",
+            ),
         ], className="filter"),
     ], className="filters"),
 
@@ -42,12 +75,17 @@ layout = html.Div([
     dcc.Store(id="live-laps-store", storage_type="session"),
     dcc.Store(id="live-page-load-trigger", data={"loaded": True}),
 
+    # KPI row
+    html.Div(id="live-info", className="kpi-row"),
+
+    # Charts
     html.Div([
-        html.Div(id="live-info"),
         dcc.Graph(id="live-position-chart"),
     ], className="charts"),
 ])
 
+
+# ── Callbacks ──────────────────────────────────────────────────
 
 @dash.callback(
     Output("live-season", "options"),
@@ -73,7 +111,6 @@ def update_live_races(season: int):
     """Load races for selected season."""
     if not season:
         return []
-    
     races = client.get_races_for_season(season)
     return [{"label": r, "value": r} for r in races]
 
@@ -93,17 +130,18 @@ def load_live_session(n_clicks: int, season: int, race: str):
 
     try:
         laps, _, session = client.load_race_session(season, race)
-        
+
         if laps.empty:
             return None, []
-        
-        drivers = sorted(laps["Driver"].unique().tolist()) if "Driver" in laps.columns else []
+
+        drivers = (
+            sorted(laps["Driver"].unique().tolist())
+            if "Driver" in laps.columns else []
+        )
         driver_options = [{"label": d, "value": d} for d in drivers]
-        
         laps_json = laps.to_json(date_format="iso", orient="split")
-        
         return laps_json, driver_options
-        
+
     except Exception as e:
         print(f"Error loading live session: {e}")
         return None, []
@@ -117,48 +155,66 @@ def load_live_session(n_clicks: int, season: int, race: str):
 )
 def update_live_view(driver: str, laps_json: str):
     """Update live view based on selected driver."""
+    empty_fig = {
+        "data": [],
+        "layout": {
+            "title": "Nenhum dado carregado",
+            "template": "plotly_white",
+        },
+    }
+
     if not laps_json:
-        return html.Div("No data loaded"), {"data": [], "layout": {"title": "No data"}}
-    
+        return [], empty_fig
+
     try:
         laps = pd.read_json(io.StringIO(laps_json), orient="split")
-        
-        # Info display
-        total_laps = len(laps)
-        total_drivers = len(laps["Driver"].unique())
-        
-        info = html.Div([
-            html.P(f"📊 Total Laps: {total_laps}"),
-            html.P(f"👥 Drivers: {total_drivers}"),
-        ])
-        
-        # Position chart
+
+        total_laps = (
+            int(laps["LapNumber"].max())
+            if "LapNumber" in laps.columns else "—"
+        )
+        total_drivers = (
+            len(laps["Driver"].unique()) if "Driver" in laps.columns else "—"
+        )
+
+        def kpi(label, value):
+            return html.Div([
+                html.Div(label, className="kpi-label"),
+                html.Div(str(value), className="kpi-value"),
+            ], className="kpi")
+
+        kpis = [
+            kpi("Total de Voltas", total_laps),
+            kpi("Pilotos", total_drivers),
+        ]
+
         fig = go.Figure()
-        
+
         if driver and "Position" in laps.columns:
             driver_laps = laps[laps["Driver"] == driver]
-            
-            fig.add_trace(
-                go.Scatter(
-                    x=driver_laps["LapNumber"],
-                    y=driver_laps["Position"],
-                    mode="lines+markers",
-                    name=driver,
-                    line=dict(width=3)
-                )
-            )
+            fig.add_trace(go.Scatter(
+                x=driver_laps["LapNumber"],
+                y=driver_laps["Position"],
+                mode="lines+markers",
+                name=driver,
+                line=dict(width=3, color="#003082"),
+                marker=dict(size=5),
+            ))
             fig.update_yaxes(autorange="reversed")
-        
+
         fig.update_layout(
-            title=f"Race Position - {driver}" if driver else "Select a driver",
-            xaxis_title="Lap Number",
-            yaxis_title="Position",
+            title=(
+                f"Posição na corrida — {driver}"
+                if driver else "Selecione um piloto"
+            ),
+            xaxis_title="Volta",
+            yaxis_title="Posição",
             template="plotly_white",
-            height=400
+            height=420,
         )
-        
-        return info, fig
-        
+
+        return kpis, fig
+
     except Exception as e:
         print(f"Error updating live view: {e}")
-        return html.Div("Error loading data"), {"data": [], "layout": {"title": "Error"}}
+        return [], empty_fig

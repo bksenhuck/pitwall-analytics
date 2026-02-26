@@ -14,17 +14,17 @@ from frontend.api import client
 def create_app():
     """
     Create and configure the Dash application.
-    
+
     Returns:
         Dash app instance
     """
     # Initialize cache
     client.enable_cache(str(CACHE_DIR))
-    
+
     # Get project root and assets folder
     project_root = Path(__file__).parent.parent
     assets_folder = project_root / "assets"
-    
+
     # Create Dash app with multi-page support
     app = dash.Dash(
         __name__,
@@ -34,29 +34,44 @@ def create_app():
         suppress_callback_exceptions=True,
         title=APP_TITLE
     )
-    
-    # Main layout with navigation
+
     app.layout = html.Div([
-        # Top navigation bar
+        # ── Header (non-fixed) ──────────────────────────────────
         html.Header([
-            html.Div("🏁 Pitwall Analytics", className="brand"),
+            html.Span([
+                html.Span("Pitwall", className="brand"),
+                html.Span(
+                    " Analytics",
+                    style={"color": "#C8D0DC", "fontWeight": "400"},
+                ),
+            ], className="brand"),
             html.Nav([
                 dash.dcc.Link("Home", href="/", className="nav-link"),
-                dash.dcc.Link("Analytics", href="/analytics", className="nav-link"),
+                dash.dcc.Link(
+                    "Analytics", href="/analytics", className="nav-link"
+                ),
                 dash.dcc.Link("Live", href="/live", className="nav-link"),
+                dash.dcc.Link("Sobre", href="/about", className="nav-link"),
             ], className="nav"),
         ], className="header"),
-        
-        # Page content (populated by dash.page_container)
-        dash.page_container,
-        
-        # Footer
-        html.Footer(
-            "© 2026 Pitwall Analytics",
-            className="footer"
+
+        # ── Page content ────────────────────────────────────────
+        html.Main(
+            dash.page_container,
+            className="page-content"
         ),
-    ], className="container")
-    
+
+        # ── Footer (non-fixed) ──────────────────────────────────
+        html.Footer([
+            html.Span("© 2026 Pitwall Analytics"),
+            html.Span(" · ", style={"margin": "0 .5rem", "color": "#9CA3AF"}),
+            html.Span(
+                "Dados via FastF1 · FastAPI · Dash",
+                style={"color": "#9CA3AF"},
+            ),
+        ], className="footer"),
+    ], className="site-wrapper")
+
     return app
 
 
@@ -64,10 +79,10 @@ def run_app(app=None):
     """Run the application server."""
     if app is None:
         app = create_app()
-    
-    print(f"🎨 Frontend starting on http://{HOST}:{PORT}")
-    print(f"📡 Backend API: {client.BACKEND_API_URL}")
-    
+
+    print(f"Frontend starting on http://{HOST}:{PORT}")
+    print(f"Backend API: {client.BACKEND_API_URL}")
+
     app.run(
         host=HOST,
         port=PORT,

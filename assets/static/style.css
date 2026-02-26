@@ -1,15 +1,387 @@
-/* Minimal styling for Pitwall Analytics */
-body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 0; }
-.container { max-width: 1100px; margin: 0 auto; padding: 16px; }
-.header { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; }
-.brand { font-weight: 700; font-size: 20px; }
-.nav a, .nav .nav-link { margin-left: 12px; text-decoration: none; color: #333; }
-.hero { padding: 24px 0; }
-.cards { display: flex; gap: 12px; }
-.card { background: #f8f9fb; padding: 12px; border-radius: 6px; min-width: 160px; }
-.card-title { font-size: 12px; color: #666; }
-.card-value { font-weight: 600; margin-top: 6px; }
-.filters { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
-.filter { min-width: 180px; }
-.charts { display: grid; grid-template-columns: 1fr; gap: 16px; }
-.footer { margin-top: 24px; color: #777; font-size: 13px; }
+/* ============================================================
+   Pitwall Analytics — Design System
+   Palette: white / F1-blue / gray / near-black
+   ============================================================ */
+
+/* ---- Variables -------------------------------------------- */
+:root {
+  --bg:         #FFFFFF;
+  --primary:    #003082;
+  --accent:     #1565C0;
+  --surface:    #F4F5F7;
+  --border:     #DDE1E7;
+  --text:       #1A1A1A;
+  --muted:      #6B7280;
+  --dark:       #0A0A14;
+  --radius:     8px;
+  --radius-sm:  4px;
+  --shadow:     0 1px 4px rgba(0,0,0,.08);
+}
+
+/* ---- Reset ------------------------------------------------ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Inter', Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+/* ---- Site wrapper (flex column, full viewport height) ----- */
+.site-wrapper {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* ---- Header ----------------------------------------------- */
+.header {
+  background: var(--dark);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2rem;
+  height: 60px;
+  border-bottom: 2px solid var(--primary);
+}
+
+.brand {
+  color: #FFFFFF;
+  font-weight: 700;
+  font-size: 1.1rem;
+  letter-spacing: .5px;
+  text-decoration: none;
+}
+
+.brand span {
+  color: var(--accent);
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.nav a, .nav .nav-link {
+  color: #C8D0DC;
+  text-decoration: none;
+  font-size: .9rem;
+  font-weight: 500;
+  padding: 0 1rem;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  border-bottom: 2px solid transparent;
+  transition: color .15s, border-color .15s;
+}
+
+.nav a:hover, .nav .nav-link:hover {
+  color: #FFFFFF;
+  border-bottom-color: var(--accent);
+}
+
+/* ---- Main content area (grows to push footer down) -------- */
+.page-content {
+  flex: 1;
+  padding: 2rem;
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* ---- Footer ---------------------------------------------- */
+.footer {
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 1.2rem 2rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: .85rem;
+}
+
+/* ---- Page title ------------------------------------------ */
+.page-title {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: .4rem;
+}
+
+.page-subtitle {
+  color: var(--muted);
+  margin-bottom: 1.8rem;
+  font-size: .95rem;
+}
+
+/* ---- Hero section ---------------------------------------- */
+.hero {
+  background: linear-gradient(135deg, var(--dark) 0%, #0d1f4a 100%);
+  color: #FFFFFF;
+  border-radius: var(--radius);
+  padding: 3.5rem 2.5rem;
+  margin-bottom: 2rem;
+}
+
+.hero h1 {
+  font-size: 2.4rem;
+  font-weight: 800;
+  letter-spacing: -.5px;
+  margin-bottom: .75rem;
+}
+
+.hero h1 span {
+  color: var(--accent);
+}
+
+.hero p {
+  font-size: 1.1rem;
+  color: #A0ADBF;
+  max-width: 600px;
+  margin-bottom: 1.8rem;
+}
+
+/* ---- Cards grid ------------------------------------------ */
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1.25rem;
+  margin-bottom: 2rem;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  box-shadow: var(--shadow);
+}
+
+.card-icon {
+  font-size: 1.8rem;
+  margin-bottom: .75rem;
+}
+
+.card-title {
+  font-size: .75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--muted);
+  margin-bottom: .4rem;
+}
+
+.card-value {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.card-desc {
+  font-size: .9rem;
+  color: var(--muted);
+  margin-top: .5rem;
+  line-height: 1.5;
+}
+
+/* Card with blue left border (feature cards) */
+.card-feature {
+  border-left: 3px solid var(--primary);
+}
+
+/* ---- KPI row --------------------------------------------- */
+.kpi-row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.5rem;
+}
+
+.kpi {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.5rem;
+  min-width: 140px;
+  box-shadow: var(--shadow);
+}
+
+.kpi-label {
+  font-size: .75rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.kpi-value {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--primary);
+  margin-top: .2rem;
+}
+
+/* ---- Section headings ------------------------------------ */
+.section-heading {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 1rem;
+  padding-bottom: .5rem;
+  border-bottom: 2px solid var(--border);
+}
+
+/* ---- Filters bar ----------------------------------------- */
+.filters {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  margin-bottom: 1.5rem;
+  padding: 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.filter {
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+  min-width: 180px;
+}
+
+.filter label {
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+/* ---- Buttons -------------------------------------------- */
+.btn-primary {
+  background: var(--primary);
+  color: #FFFFFF;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: .6rem 1.4rem;
+  font-size: .9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s;
+  white-space: nowrap;
+}
+
+.btn-primary:hover {
+  background: var(--accent);
+}
+
+/* ---- Charts area ---------------------------------------- */
+.charts {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+}
+
+/* ---- Alert / banner ------------------------------------- */
+.alert {
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+  font-size: .9rem;
+  display: flex;
+  gap: .75rem;
+  align-items: flex-start;
+}
+
+.alert-warning {
+  background: #FFF8E1;
+  border: 1px solid #F9C02A;
+  color: #7A5C00;
+}
+
+.alert-error {
+  background: #FFEBEE;
+  border: 1px solid #EF5350;
+  color: #7B1A1A;
+}
+
+.alert-info {
+  background: #E3F2FD;
+  border: 1px solid #90CAF9;
+  color: #0D3B6E;
+}
+
+.alert-icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+/* ---- Stack badges --------------------------------------- */
+.badge-row {
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+
+.badge {
+  background: rgba(255,255,255,.1);
+  color: #C8D0DC;
+  border: 1px solid rgba(255,255,255,.2);
+  border-radius: 999px;
+  padding: .25rem .85rem;
+  font-size: .8rem;
+  font-weight: 500;
+}
+
+/* badges on white background */
+.badge-dark {
+  background: var(--dark);
+  color: #C8D0DC;
+  border-radius: 999px;
+  padding: .25rem .85rem;
+  font-size: .8rem;
+  font-weight: 500;
+}
+
+/* ---- About page flow steps ------------------------------ */
+.flow-steps {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  flex-wrap: wrap;
+  margin: 1rem 0;
+}
+
+.flow-step {
+  background: var(--primary);
+  color: #FFFFFF;
+  border-radius: var(--radius-sm);
+  padding: .4rem .9rem;
+  font-size: .85rem;
+  font-weight: 600;
+}
+
+.flow-arrow {
+  color: var(--muted);
+  font-size: 1.1rem;
+}
+
+/* ---- Utility -------------------------------------------- */
+.mt-1 { margin-top: .5rem; }
+.mt-2 { margin-top: 1rem; }
+.mt-3 { margin-top: 1.5rem; }
+.mb-1 { margin-bottom: .5rem; }
+.mb-2 { margin-bottom: 1rem; }
+code {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: .15rem .45rem;
+  font-size: .85em;
+  color: var(--primary);
+}

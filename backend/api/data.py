@@ -52,16 +52,22 @@ async def get_available_data() -> Dict[str, Any]:
 
 
 @router.get('/data/stats')
-async def get_database_stats() -> Dict[str, Any]:
+async def get_database_stats(
+    season: Optional[int] = Query(None, description="Season year (optional)")
+) -> Dict[str, Any]:
     """
     Get database statistics.
-    
-    Returns:
-        Statistics about cached data
+
+    If season is provided, returns stats for that season.
+    Otherwise returns stats for all available seasons.
     """
     try:
-        stats = f1_service.get_database_stats()
-        return stats
+        if season:
+            return f1_service.get_database_stats(season)
+        seasons = f1_service.get_available_seasons()
+        return {
+            'seasons': [f1_service.get_database_stats(s) for s in seasons]
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -246,6 +252,30 @@ async def get_session_drivers(
         return drivers
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get('/data/telemetry')
+async def get_telemetry(
+    season: int = Query(..., description="Season year"),
+    event: str = Query(..., description="Event name"),
+    session_type: str = Query('R', description="Session type"),
+    driver: str = Query(..., description="Driver code (e.g. HAM)"),
+    lap: int = Query(..., description="Lap number")
+) -> Dict[str, Any]:
+    """
+    Get telemetry samples for a specific driver lap.
+
+    Returns X/Y/Z track position plus car channels
+    (speed, RPM, gear, throttle, brake, DRS).
+    """
+    try:
+        return f1_service.get_driver_telemetry(
+            season, event, session_type, driver, lap
+        )
+    except Exception as e:
+        error_msg = str(e)
+        status_code = 404 if 'not found' in error_msg.lower() else 500
+        raise HTTPException(status_code=status_code, detail=error_msg)
 
 
 @router.get('/data/sessions/{season}/{event}')

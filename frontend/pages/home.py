@@ -1,56 +1,95 @@
-"""Home page - Landing page for Pitwall Analytics"""
+"""Home page - Landing / welcome page for Pitwall Analytics"""
 import dash
 from dash import html
 
 dash.register_page(__name__, path="/", name="Home")
 
+_PAGES = [
+    {
+        "icon": "📊",
+        "title": "Analytics",
+        "href": "/analytics",
+        "desc": (
+            "Mergulhe nos dados de corrida. Compare tempos de volta, "
+            "evolução de posições e desempenho por piloto ao longo de "
+            "toda a temporada."
+        ),
+    },
+    {
+        "icon": "🏁",
+        "title": "Live",
+        "href": "/live",
+        "desc": (
+            "Carregue uma corrida e acompanhe a evolução da prova volta "
+            "a volta — posições, gaps e contexto de cada stint."
+        ),
+    },
+    {
+        "icon": "ℹ️",
+        "title": "Sobre",
+        "href": "/about",
+        "desc": (
+            "A motivação por trás do projeto, a arquitetura de dados e "
+            "o roadmap do que vem por aí."
+        ),
+    },
+]
 
-def overview_card(title: str, value: str):
-    """Create a simple info card"""
-    return html.Div([
-        html.Div(title, className="card-title"),
-        html.Div(value, className="card-value"),
-    ], className="card")
+
+def _page_card(page):
+    return html.A([
+        html.Div(page["icon"], className="card-icon"),
+        html.Div(page["title"], className="card-value"),
+        html.Div(page["desc"], className="card-desc"),
+    ], href=page["href"], className="card card-feature", style={
+        "textDecoration": "none",
+        "color": "inherit",
+        "cursor": "pointer",
+        "transition": "box-shadow .15s",
+    })
 
 
 layout = html.Div([
+    # ── Hero ───────────────────────────────────────────────────
     html.Section([
-        html.H1("🏁 Pitwall Analytics"),
-        html.P("F1 Race Analytics Dashboard - Your gateway to Formula 1 data insights"),
+        html.H1([
+            html.Span("Pitwall", style={"color": "#90CAF9"}),
+            " Analytics",
+        ]),
+        html.P(
+            "Dados reais de Formula 1 — histórico completo de corridas, "
+            "tempos de volta e posições em uma interface interativa e rápida."
+        ),
+        html.Div([
+            html.Span("FastF1", className="badge"),
+            html.Span("SQLite", className="badge"),
+            html.Span("FastAPI", className="badge"),
+            html.Span("Dash", className="badge"),
+        ], className="badge-row"),
     ], className="hero"),
 
+    # ── O que tem aqui ─────────────────────────────────────────
     html.Section([
-        html.Div([
-            overview_card("Data Source", "FastF1 + SQLite Cache"),
-            overview_card("Architecture", "FastAPI + Dash"),
-            overview_card("Latest Season", "2024 (+ historical data)"),
-        ], className="cards"),
-    ], className="overview"),
+        html.H2("Explore o dashboard", className="section-heading"),
+        html.Div(
+            [_page_card(p) for p in _PAGES],
+            className="cards-grid",
+        ),
+    ], className="mt-2"),
 
+    # ── Quick start ─────────────────────────────────────────────
     html.Section([
-        html.H3("📊 Get Started"),
-        html.Ul([
-            html.Li([
-                html.Strong("Analytics Page: "),
-                "Explore race data, lap times, and driver performance"
-            ]),
-            html.Li([
-                html.Strong("Live Page: "),
-                "Visualize race telemetry and track positions"
-            ]),
-            html.Li([
-                html.Strong("Populate Data: "),
-                html.Code("python scripts/populate_cache.py --season 2024")
-            ]),
-        ]),
-    ], className="notes"),
-    
-    html.Section([
-        html.H3("🔧 Quick Start"),
+        html.H2("Quick start", className="section-heading"),
         html.Ol([
-            html.Li("Ensure backend is running (python main.py)"),
-            html.Li("Populate cache with F1 data using scripts"),
-            html.Li("Navigate to Analytics to explore race sessions"),
-        ]),
-    ], className="notes"),
-], className="page")
+            html.Li([
+                "Suba o servidor: ",
+                html.Code("python main.py"),
+            ], style={"marginBottom": ".5rem"}),
+            html.Li([
+                "Popule o cache: ",
+                html.Code("python scripts/populate_cache.py --season 2024"),
+            ], style={"marginBottom": ".5rem"}),
+            html.Li("Acesse Analytics e explore as corridas."),
+        ], style={"paddingLeft": "1.25rem", "color": "var(--muted)"}),
+    ], className="mt-3"),
+])

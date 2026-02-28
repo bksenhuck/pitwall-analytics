@@ -12,8 +12,14 @@ from backend.services.downloader import FastF1Downloader
 
 logger = logging.getLogger(__name__)
 
-_SESSION_TYPES_CONVENTIONAL = ["FP1", "FP2", "FP3", "Q", "R"]
-_SESSION_TYPES_SPRINT = ["FP1", "SQ", "S", "Q", "R"]
+# Map EventFormat values to session type lists (no extra API calls needed)
+_SESSION_TYPES: dict[str, list[str]] = {
+    "conventional":    ["FP1", "FP2", "FP3", "Q", "R"],
+    "sprint":          ["FP1", "SQ", "S", "Q", "R"],
+    "sprint_shootout": ["FP1", "SQ", "S", "Q", "R"],
+    "testing":         ["FP1", "FP2", "FP3"],  # test events: 3 practice days
+}
+_SESSION_TYPES_DEFAULT = _SESSION_TYPES["conventional"]
 
 
 class SeasonPipeline(BasePipeline):
@@ -65,11 +71,14 @@ class SeasonPipeline(BasePipeline):
                     event_info.get("OfficialEventName", f"Round {idx}"),
                 )
             )
+            event_format = str(
+                event_info.get("EventFormat", "conventional")
+            ).lower()
 
             if event_filter and event_filter.lower() not in event_name.lower():
                 continue
 
-            print(f"\n[{idx}/{total}] {event_name}")
+            print(f"\n[{idx}/{total}] {event_name}  [{event_format}]")
             print("-" * 60)
 
             event_id = self._insert_event(season, event_info, idx)
@@ -77,10 +86,18 @@ class SeasonPipeline(BasePipeline):
                 print("  Evento ignorado (falha ao inserir no banco)")
                 continue
 
-            self._run_event_sessions(season, event_name, event_id)
+            session_types = _SESSION_TYPES.get(
+                event_format, _SESSION_TYPES_DEFAULT
+            )
+            self._run_event_sessions(
+                season, event_name, event_id, session_types
+            )
 
         print(f"\n{'='*60}")
-        print(f"  Temporada {season} concluida  |  {self.downloader.api_calls} chamadas API")
+        print(
+            f"  Temporada {season} concluida  "
+            f"|  {self.downloader.api_calls} chamadas API"
+        )
         print(f"{'='*60}\n")
 
     # ------------------------------------------------------------------
@@ -88,15 +105,19 @@ class SeasonPipeline(BasePipeline):
     # ------------------------------------------------------------------
 
     def _run_event_sessions(
-        self, season: int, event_name: str, event_id: int
+        self,
+        season: int,
+        event_name: str,
+        event_id: int,
+        session_types: list[str],
     ) -> None:
-        """Download and store all sessions for a single event."""
-        session_types = self._resolve_session_types(season, event_name)
-
+        """Download and store the given session types for one event."""
         for session_type in session_types:
             print(f"  {session_type}...", end=" ", flush=True)
             try:
-                session = self.downloader.get_session(season, event_name, session_type)
+                session = self.downloader.get_session(
+                    season, event_name, session_type
+                )
                 self.downloader.load_session(
                     session,
                     laps=True,
@@ -105,38 +126,34 @@ class SeasonPipeline(BasePipeline):
                     messages=True,
                 )
 
-                session_id = self._insert_session(season, event_id, session_type, session)
+                session_id = self._insert_session(
+                    season, event_id, session_type, session
+                )
                 if not session_id:
                     print("ERRO (falha ao inserir sessao)")
                     continue
 
-                laps    = self._insert_laps(season, session_id, session)
-                tel     = self._insert_telemetry(season, session_id, session)
+                laps = self._insert_laps(season, session_id, session)
+                tel = self._insert_telemetry(season, session_id, session)
                 results = self._insert_results(season, session_id, session)
                 weather = self._insert_weather(season, session_id, session)
-                msgs    = self._insert_race_control_messages(season, session_id, session)
-                status  = self._insert_session_status(season, session_id, session)
+                msgs = self._insert_race_control_messages(
+                    season, session_id, session
+                )
+                status = self._insert_session_status(
+                    season, session_id, session
+                )
 
                 print(
-                    f"OK  L:{laps} T:{tel} R:{results} W:{weather} M:{msgs} S:{status}"
+                    f"OK  "
+                    f"L:{laps} T:{tel} R:{results} "
+                    f"W:{weather} M:{msgs} S:{status}"
                 )
 
             except Exception as exc:
                 print(f"IGNORADO  ({str(exc)[:70]})")
                 logger.warning(
-                    "Session %s/%s/%s skipped: %s", season, event_name, session_type, exc
+                    "Session %s/%s/%s skipped: %s",
+                    season, event_name, session_type, exc,
                 )
                 continue
-
-    def _resolve_session_types(self, season: int, event_name: str) -> list:
-        """
-        Determine which session types to load for an event.
-
-        Tries to detect sprint weekends by probing the 'S' session;
-        falls back to the conventional list on any error.
-        """
-        try:
-            self.downloader.get_session(season, event_name, "S")
-            return list(_SESSION_TYPES_SPRINT)
-        except Exception:
-            return list(_SESSION_TYPES_CONVENTIONAL)

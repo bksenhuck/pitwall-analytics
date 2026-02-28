@@ -205,78 +205,78 @@ def get_race_results(season: int, event_name: str) -> pd.DataFrame:
     return pd.DataFrame()
 
 
-def load_race_session(
-    season: int, event_name: str
+def load_session(
+    season: int, event_name: str, session_type: str
 ) -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
     """
-    Load a race session from normalized SQLite cache.
-    
+    Load any session type from normalized SQLite cache.
+
     Args:
         season: F1 season year (e.g., 2024)
         event_name: Event name (e.g., "Bahrain Grand Prix")
-    
+        session_type: FastF1 session code (R, Q, FP1, FP2, FP3, S, SQ)
+
     Returns:
         tuple: (laps_df, telemetry_df, session_data)
     """
     if not _check_backend_available():
         return pd.DataFrame(), pd.DataFrame(), {"error": "Backend not available"}
-    
+
     try:
-        url = f"{BACKEND_API_URL}/data/session"
-        
-        # Try with "R" (FastF1 code for Race)
         response = requests.get(
-            url,
-            params={"season": season, "event": event_name, "session_type": "R"},
-            timeout=30
+            f"{BACKEND_API_URL}/data/session",
+            params={
+                "season": season,
+                "event": event_name,
+                "session_type": session_type,
+            },
+            timeout=30,
         )
-        
-        # Fallback to "Race" if not found
+
         if response.status_code == 404:
-            response = requests.get(
-                url,
-                params={"season": season, "event": event_name, "session_type": "Race"},
-                timeout=30
-            )
-        
-        if response.status_code == 404:
-            print(f"⚠️  Race data for {season} {event_name} not found")
-            return pd.DataFrame(), pd.DataFrame(), {"error": "No race session"}
-        
+            print(f"⚠️  {season} {event_name} [{session_type}] not found")
+            return pd.DataFrame(), pd.DataFrame(), {"error": "Session not found"}
+
         if not response.text:
             return pd.DataFrame(), pd.DataFrame(), {"error": "Empty response"}
-        
+
         response.raise_for_status()
         data = response.json()
-        
+
         if "laps" not in data:
             return pd.DataFrame(), pd.DataFrame(), {"error": "Invalid format"}
-        
-        # Convert laps to DataFrame
+
         laps = pd.DataFrame(data["laps"])
-        
-        # Normalize column names
-        if "lap_time_seconds" in laps.columns:
-            laps["LapTimeSeconds"] = laps["lap_time_seconds"]
-        if "driver_code" in laps.columns:
-            laps["Driver"] = laps["driver_code"]
-        if "lap_number" in laps.columns:
-            laps["LapNumber"] = laps["lap_number"]
-        if "position" in laps.columns:
-            laps["Position"] = laps["position"]
-        
-        # Session metadata
+
+        # Normalize column names to match existing page expectations
+        col_map = {
+            "lap_time_seconds": "LapTimeSeconds",
+            "driver_code": "Driver",
+            "lap_number": "LapNumber",
+            "position": "Position",
+        }
+        for src, dst in col_map.items():
+            if src in laps.columns:
+                laps[dst] = laps[src]
+
         session_data = {
             "season": season,
             "event_name": event_name,
+            "session_type": session_type,
             "drivers": data.get("drivers", []),
-            "lap_count": len(laps)
+            "lap_count": len(laps),
         }
-        
-        print(f"✅ Loaded {len(laps)} laps for {event_name}")
-        
+
+        print(f"✅ Loaded {len(laps)} laps for {event_name} [{session_type}]")
         return laps, pd.DataFrame(), session_data
-        
+
     except Exception as e:
-        print(f"❌ Error loading race session: {e}")
+        print(f"❌ Error loading session: {e}")
         return pd.DataFrame(), pd.DataFrame(), {"error": str(e)}
+
+
+def load_race_session(
+    season: int, event_name: str
+) -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
+    """Load the Race session (R). Alias for load_session with session_type='R'."""
+    return load_session(season, event_name, "R")

@@ -31,6 +31,9 @@ requests>=2.31.0
 # Environment & Configuration
 python-dotenv>=1.0.0
 
+# Google Cloud Storage
+google-cloud-storage>=2.10.0
+
 # Development (optional)
 # pytest>=7.4.0
 # pytest-asyncio>=0.21.0          # For testing async endpoints

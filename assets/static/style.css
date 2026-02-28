@@ -38,6 +38,11 @@ body {
 
 /* ---- Header ----------------------------------------------- */
 .header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
   background: var(--dark);
   display: flex;
   align-items: center;
@@ -87,6 +92,7 @@ body {
 .page-content {
   flex: 1;
   padding: 2rem;
+  padding-top: calc(60px + 2rem);
   max-width: 1200px;
   width: 100%;
   margin: 0 auto;
@@ -463,6 +469,87 @@ body {
   font-size: .68rem;
   color: var(--muted);
 }
+
+/* ---- Analytics sub-navigation --------------------------- */
+.analytics-subnav {
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.75rem;
+  padding: .5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.subnav-link {
+  padding: .45rem 1.2rem;
+  font-size: .875rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  transition: color .15s, background .15s, border-color .15s;
+  white-space: nowrap;
+}
+
+.subnav-link:hover {
+  color: var(--text);
+  background: var(--border);
+}
+
+.subnav-link.active {
+  color: #fff;
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+/* ---- Analytics hub grid --------------------------------- */
+.hub-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1.25rem;
+  margin-top: 1rem;
+}
+
+.hub-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2rem 1.5rem;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  transition: border-color .15s, transform .15s;
+  text-decoration: none;
+}
+
+.hub-card:hover {
+  border-color: var(--primary);
+  transform: translateY(-2px);
+}
+
+.hub-card-icon {
+  font-size: 2.2rem;
+  display: block;
+  margin-bottom: .75rem;
+}
+
+.hub-card-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: .5rem;
+}
+
+.hub-card-desc {
+  font-size: .88rem;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+/* ---- Plotly modebar (toolbar) — ocultar globalmente ----- */
+.modebar { display: none !important; }
 
 /* ---- Utility -------------------------------------------- */
 .mt-1 { margin-top: .5rem; }

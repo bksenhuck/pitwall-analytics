@@ -6,7 +6,6 @@ dash.register_page(__name__, path="/", name="Home")
 
 _PAGES = [
     {
-        "icon": "📊",
         "title": "Analytics",
         "href": "/analytics",
         "desc": (
@@ -16,7 +15,6 @@ _PAGES = [
         ),
     },
     {
-        "icon": "🏁",
         "title": "Live",
         "href": "/live",
         "desc": (
@@ -25,7 +23,6 @@ _PAGES = [
         ),
     },
     {
-        "icon": "ℹ️",
         "title": "Sobre",
         "href": "/about",
         "desc": (
@@ -38,7 +35,6 @@ _PAGES = [
 
 def _page_card(page):
     return html.A([
-        html.Div(page["icon"], className="card-icon"),
         html.Div(page["title"], className="card-value"),
         html.Div(page["desc"], className="card-desc"),
     ], href=page["href"], className="card card-feature", style={
@@ -77,19 +73,4 @@ layout = html.Div([
         ),
     ], className="mt-2"),
 
-    # ── Quick start ─────────────────────────────────────────────
-    html.Section([
-        html.H2("Quick start", className="section-heading"),
-        html.Ol([
-            html.Li([
-                "Suba o servidor: ",
-                html.Code("python main.py"),
-            ], style={"marginBottom": ".5rem"}),
-            html.Li([
-                "Popule o cache: ",
-                html.Code("python scripts/populate_cache.py --season 2024"),
-            ], style={"marginBottom": ".5rem"}),
-            html.Li("Acesse Analytics e explore as corridas."),
-        ], style={"paddingLeft": "1.25rem", "color": "var(--muted)"}),
-    ], className="mt-3"),
 ])

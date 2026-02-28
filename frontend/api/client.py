@@ -164,7 +164,50 @@ def get_races_for_season(season: int) -> List[str]:
         return []
 
 
-def load_race_session(season: int, event_name: str) -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
+def get_race_results(season: int, event_name: str) -> pd.DataFrame:
+    """
+    Load race results (position, points, team) for one event.
+
+    Returns a DataFrame with columns: driver_code, team, points, position.
+    Returns an empty DataFrame on error.
+    """
+    if not _check_backend_available():
+        return pd.DataFrame()
+
+    for session_type in ("R", "Race"):
+        try:
+            response = requests.get(
+                f"{BACKEND_API_URL}/data/session",
+                params={
+                    "season": season,
+                    "event": event_name,
+                    "session_type": session_type,
+                    "include_laps": False,
+                    "include_results": True,
+                },
+                timeout=15,
+            )
+            if response.status_code == 404:
+                continue
+            response.raise_for_status()
+            data = response.json()
+            results = data.get("results", [])
+            if not results:
+                return pd.DataFrame()
+            df = pd.DataFrame(results)
+            for col in ("driver_code", "team", "points", "position"):
+                if col not in df.columns:
+                    df[col] = None
+            return df[["driver_code", "team", "points", "position"]]
+        except Exception as e:
+            print(f"❌ Error loading results for {event_name}: {e}")
+            return pd.DataFrame()
+    return pd.DataFrame()
+
+
+def load_race_session(
+    season: int, event_name: str
+) -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
     """
     Load a race session from normalized SQLite cache.
     

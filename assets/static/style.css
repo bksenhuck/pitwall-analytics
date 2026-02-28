@@ -551,6 +551,66 @@ body {
 /* ---- Plotly modebar (toolbar) — ocultar globalmente ----- */
 .modebar { display: none !important; }
 
+/* ---- Chart workspace (sidebar + chart area) ------------- */
+.chart-workspace {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.chart-sidebar {
+  width: 190px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: .5rem;
+}
+
+.chart-sidebar-title {
+  font-size: .7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--muted);
+  padding: .5rem .75rem .4rem;
+}
+
+.chart-area {
+  flex: 1;
+  min-width: 0;
+}
+
+/* RadioItems styled as nav list */
+.chart-nav { width: 100%; }
+.chart-nav > div { width: 100%; }
+
+.chart-nav-radio { display: none; }
+
+.chart-nav-item {
+  display: block;
+  width: 100%;
+  padding: .55rem .75rem;
+  font-size: .875rem;
+  font-weight: 500;
+  color: var(--muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background .12s, color .12s;
+  user-select: none;
+}
+
+.chart-nav-item:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+.chart-nav-radio:checked + .chart-nav-item {
+  background: var(--primary);
+  color: #fff;
+  font-weight: 600;
+}
+
 /* ---- Utility -------------------------------------------- */
 .mt-1 { margin-top: .5rem; }
 .mt-2 { margin-top: 1rem; }

@@ -10,8 +10,7 @@ import pandas as pd
 
 from frontend.f1_config import (
     get_driver_color,
-    color_list_for_drivers,
-    _FALLBACK_COLOR,
+    get_team_color,
 )
 
 
@@ -196,6 +195,239 @@ def speed_telemetry_chart(telemetry: pd.DataFrame) -> go.Figure:
         yaxis_title="Velocidade (km/h)",
         height=400,
     ))
+    return fig
+
+
+def lap_time_beeswarm_chart(
+    laps: pd.DataFrame, season: Optional[int] = None
+) -> go.Figure:
+    """
+    Strip/beeswarm chart of lap times grouped by team.
+    Each dot = one lap, colored and grouped by team.
+    Teams ordered fastest (bottom) → slowest (top).
+    X axis reversed: slow laps on left, fast on right.
+    """
+    fig = go.Figure()
+
+    _title = "Tempos de Volta por Equipe"
+
+    if laps.empty or "LapTimeSeconds" not in laps.columns:
+        fig.update_layout(**_base_layout(_title, height=500))
+        return fig
+
+    df = laps.copy()
+
+    # Determine team column
+    team_col = (
+        "team"
+        if "team" in df.columns and df["team"].notna().any()
+        else None
+    )
+    if team_col is None:
+        fig.update_layout(**_base_layout(_title, height=500))
+        return fig
+
+    # Filter: valid lap times + accurate laps only
+    df = df[df["LapTimeSeconds"].notna() & (df["LapTimeSeconds"] > 0)].copy()
+    if "is_accurate" in df.columns:
+        df = df[df["is_accurate"].isin([1, True])]
+    if df.empty:
+        fig.update_layout(**_base_layout(_title, height=500))
+        return fig
+
+    # Remove extreme outliers (> 3× median — pit stop / safety car laps)
+    median = df["LapTimeSeconds"].median()
+    df = df[df["LapTimeSeconds"] < median * 1.6]
+
+    # Order: fastest median at bottom of chart
+    team_medians = df.groupby(team_col)["LapTimeSeconds"].median()
+    ordered_teams = team_medians.sort_values(ascending=True).index.tolist()
+
+    # Shapes: background band + vertical median line per team
+    shapes = []
+    for i, team in enumerate(ordered_teams):
+        hex_color = get_team_color(team)
+        r = int(hex_color[1:3], 16)
+        g = int(hex_color[3:5], 16)
+        b = int(hex_color[5:7], 16)
+        # Light background band
+        shapes.append(dict(
+            type="rect",
+            xref="paper", yref="y",
+            x0=0, x1=1,
+            y0=i - 0.5, y1=i + 0.5,
+            fillcolor=f"rgba({r},{g},{b},0.08)",
+            line=dict(width=0),
+            layer="below",
+        ))
+        # Vertical dotted median line for this team
+        shapes.append(dict(
+            type="line",
+            xref="x", yref="y",
+            x0=team_medians[team], x1=team_medians[team],
+            y0=i - 0.42, y1=i + 0.42,
+            line=dict(
+                color=hex_color,
+                dash="dot",
+                width=2.5,
+            ),
+            layer="above",
+        ))
+
+    # One Box trace per team (box hidden, only points shown, no tooltip)
+    for team in ordered_teams:
+        team_laps = df[df[team_col] == team]["LapTimeSeconds"]
+        color = get_team_color(team)
+        fig.add_trace(go.Box(
+            x=team_laps,
+            y=[team] * len(team_laps),
+            name=team,
+            orientation="h",
+            boxpoints="all",
+            jitter=0.45,
+            pointpos=0,
+            marker=dict(color=color, size=4, opacity=0.75),
+            line=dict(color="rgba(0,0,0,0)", width=0),
+            fillcolor="rgba(0,0,0,0)",
+            whiskerwidth=0,
+            showlegend=False,
+            hoverinfo="skip",
+        ))
+
+    height = max(480, len(ordered_teams) * 62 + 130)
+
+    layout = _base_layout(
+        _title,
+        xaxis_title="Tempo de Volta (s)",
+        xaxis_autorange="reversed",
+        yaxis=dict(
+            categoryorder="array",
+            categoryarray=ordered_teams,   # fastest at bottom
+            showgrid=False,
+            zeroline=False,
+            linecolor=_BORDER,
+            tickfont=dict(color=_TEXT, size=12),
+            title_font=dict(color=_MUTED),
+            automargin=True,
+        ),
+        shapes=shapes,
+        height=height,
+        hovermode=False,
+        margin=dict(t=90, l=140, r=20, b=50),
+    )
+    fig.update_layout(**layout)
+    return fig
+
+
+def race_position_chart(
+    laps: pd.DataFrame, season: Optional[int] = None
+) -> go.Figure:
+    """
+    Race position evolution for all drivers.
+    Left Y: driver codes at their final position.
+    Right Y: position numbers (P1, P2, ...).
+    X: lap number.
+    """
+    fig = go.Figure()
+
+    if (
+        laps.empty
+        or "Position" not in laps.columns
+        or "Driver" not in laps.columns
+        or "LapNumber" not in laps.columns
+    ):
+        fig.update_layout(**_base_layout("Evolução de Posição", height=520))
+        return fig
+
+    df = laps[laps["Position"].notna() & laps["LapNumber"].notna()].copy()
+    df["Position"] = df["Position"].astype(int)
+
+    if df.empty:
+        fig.update_layout(**_base_layout("Evolução de Posição", height=520))
+        return fig
+
+    # Final position per driver (last lap they appear)
+    final_positions = {}
+    for drv in df["Driver"].unique():
+        drv_df = df[df["Driver"] == drv]
+        last_row = drv_df.loc[drv_df["LapNumber"].idxmax()]
+        pos = last_row["Position"]
+        if pd.notna(pos):
+            final_positions[drv] = int(pos)
+
+    if not final_positions:
+        fig.update_layout(**_base_layout("Evolução de Posição", height=520))
+        return fig
+
+    n = len(final_positions)
+
+    def _ordinal(num):
+        if 11 <= (num % 100) <= 13:
+            return f"{num}th"
+        return f"{num}{['th', 'st', 'nd', 'rd', 'th'][min(num % 10, 4)]}"
+
+    # Left Y tick labels: driver code at each position slot
+    left_ticks = {pos: drv for drv, pos in final_positions.items()}
+    left_ticktext = [left_ticks.get(i, "") for i in range(1, n + 1)]
+    right_ticktext = [_ordinal(i) for i in range(1, n + 1)]
+
+    # One trace per driver, sorted by final position
+    for drv in sorted(final_positions, key=lambda d: final_positions[d]):
+        drv_laps = df[df["Driver"] == drv].sort_values("LapNumber")
+        color = get_driver_color(season, drv)
+        fig.add_trace(go.Scatter(
+            x=drv_laps["LapNumber"],
+            y=drv_laps["Position"],
+            mode="lines",
+            name=drv,
+            line=dict(color=color, width=1.5),
+            hoverinfo="skip",
+        ))
+
+    y_range = [n + 0.5, 0.5]
+
+    # Right-side ordinal labels as annotations (more reliable than yaxis2
+    # with staticPlot, which often suppresses secondary axes)
+    right_annotations = [
+        dict(
+            text=right_ticktext[i],
+            x=1.01,
+            y=i + 1,
+            xref="paper",
+            yref="y",
+            xanchor="left",
+            yanchor="middle",
+            showarrow=False,
+            font=dict(color=_MUTED, size=11,
+                      family="Inter, Arial, sans-serif"),
+        )
+        for i in range(n)
+    ]
+
+    layout = _base_layout(
+        "Evolução de Posição",
+        xaxis_title="Volta",
+        yaxis=dict(
+            tickvals=list(range(1, n + 1)),
+            ticktext=left_ticktext,
+            range=y_range,
+            showgrid=False,
+            zeroline=False,
+            linecolor=_BORDER,
+            tickfont=dict(
+                color=_TEXT, size=11,
+                family="monospace, Inter, Arial",
+            ),
+            title_font=dict(color=_MUTED),
+            automargin=True,
+        ),
+        showlegend=False,
+        hovermode=False,
+        height=520,
+        margin=dict(t=90, l=60, r=70, b=50),
+    )
+    layout["annotations"] = layout.get("annotations", []) + right_annotations
+    fig.update_layout(**layout)
     return fig
 
 

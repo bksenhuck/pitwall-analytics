@@ -1,23 +1,31 @@
 """Analytics › Corrida — tempos de volta, posições e telemetria."""
+import io
 import dash
 from dash import html, dcc, Input, Output, State
 import pandas as pd
-import io
-
 from frontend.components.charts import (
-    lap_time_chart,
-    position_chart,
-    speed_telemetry_chart,
+    lap_time_beeswarm_chart,
+    race_position_chart,
+    _base_layout,
 )
 from frontend.components.navigation import create_analytics_subnav
+from frontend.f1_config import get_driver_color
 from frontend.api import client
 
 dash.register_page(__name__, path="/analytics/corrida", name="Corrida")
 
+_MUTED = "#6B7280"
+_PRIMARY = "#003082"
+_BORDER = "#DDE1E7"
+_SURFACE = "#F4F5F7"
+
 layout = html.Div([
     html.Div([
         html.H1("Analytics · Corrida", className="page-title"),
-        html.P("Tempos de volta, posições e desempenho por piloto.", className="page-subtitle"),
+        html.P(
+            "Tempos de volta e evolução de posições da corrida.",
+            className="page-subtitle",
+        ),
     ]),
 
     create_analytics_subnav("/analytics/corrida"),
@@ -28,21 +36,29 @@ layout = html.Div([
     html.Div([
         html.Div([
             html.Label("Temporada"),
-            dcc.Dropdown(id="corrida-season-dropdown", options=[], placeholder="Selecione a temporada"),
+            dcc.Dropdown(
+                id="corrida-season-dropdown",
+                options=[],
+                placeholder="Selecione a temporada",
+            ),
         ], className="filter"),
 
         html.Div([
             html.Label("Corrida"),
-            dcc.Dropdown(id="corrida-race-dropdown", options=[], placeholder="Selecione a corrida"),
+            dcc.Dropdown(
+                id="corrida-race-dropdown",
+                options=[],
+                placeholder="Selecione a corrida",
+            ),
         ], className="filter"),
 
         html.Div([
-            html.Label("Piloto"),
-            dcc.Dropdown(id="corrida-driver-dropdown", options=[], placeholder="Todos os pilotos"),
-        ], className="filter"),
-
-        html.Div([
-            html.Button("Carregar corrida", id="corrida-load-button", n_clicks=0, className="btn-primary"),
+            html.Button(
+                "Carregar corrida",
+                id="corrida-load-button",
+                n_clicks=0,
+                className="btn-primary",
+            ),
         ], className="filter"),
     ], className="filters"),
 
@@ -50,14 +66,308 @@ layout = html.Div([
     dcc.Store(id="corrida-session-store", storage_type="session"),
     dcc.Store(id="corrida-page-trigger", data={"loaded": True}),
 
-    html.Div(id="corrida-kpi-row", className="kpi-row"),
-
+    # ── Chart workspace ──────────────────────────────────────────
     html.Div([
-        dcc.Graph(id="corrida-lap-time-graph"),
-        dcc.Graph(id="corrida-position-graph"),
-        dcc.Graph(id="corrida-speed-telemetry-graph"),
-    ], className="charts"),
+        # Sidebar
+        html.Div([
+            html.Div("Visualizações", className="chart-sidebar-title"),
+            dcc.RadioItems(
+                id="corrida-chart-selector",
+                options=[
+                    {"label": "KPIs & Classificação", "value": "big-numbers"},
+                    {"label": "Tempos por Equipe", "value": "beeswarm"},
+                    {"label": "Evolução de Posições", "value": "positions"},
+                ],
+                value="big-numbers",
+                className="chart-nav",
+                labelClassName="chart-nav-item",
+                inputClassName="chart-nav-radio",
+            ),
+        ], className="chart-sidebar"),
+
+        # Chart area — content driven by callback
+        html.Div(id="corrida-chart-area-content", className="chart-area"),
+    ], className="chart-workspace"),
 ])
+
+
+# ── Helpers ─────────────────────────────────────────────────────
+
+def _fmt_lap(seconds):
+    m, s = divmod(seconds, 60)
+    return f"{int(m)}:{s:05.2f}"
+
+
+def _build_stats_panel(laps_json, session_meta):
+    """Big Numbers panel: KPIs + final standings."""
+    if not laps_json:
+        return html.Div(
+            "Carregue uma corrida para ver os dados.",
+            style={"color": _MUTED, "padding": "2rem", "fontSize": ".95rem"},
+        )
+
+    try:
+        laps = pd.read_json(io.StringIO(laps_json), orient="split")
+        season = session_meta.get("season") if session_meta else None
+        race_label = session_meta.get("race", "—") if session_meta else "—"
+
+        # ── KPIs ────────────────────────────────────────────────
+        total_laps = (
+            int(laps["LapNumber"].max())
+            if "LapNumber" in laps.columns else "—"
+        )
+        total_drivers = (
+            len(laps["Driver"].unique())
+            if "Driver" in laps.columns else "—"
+        )
+        best_lap = "—"
+        best_lap_driver = ""
+        best_lap_seconds = None
+        if "LapTimeSeconds" in laps.columns and "Driver" in laps.columns:
+            valid = laps[laps["LapTimeSeconds"].notna()]
+            if not valid.empty:
+                idx = valid["LapTimeSeconds"].idxmin()
+                best_lap = _fmt_lap(valid.at[idx, "LapTimeSeconds"])
+                best_lap_driver = valid.at[idx, "Driver"]
+                best_lap_seconds = valid.at[idx, "LapTimeSeconds"]
+
+        def kpi(label, value, sub=None):
+            children = [
+                html.Div(label, className="kpi-label"),
+                html.Div(str(value), className="kpi-value"),
+            ]
+            if sub:
+                children.append(html.Div(
+                    sub,
+                    style={
+                        "fontSize": ".75rem",
+                        "color": _MUTED,
+                        "marginTop": ".1rem",
+                    },
+                ))
+            return html.Div(children, className="kpi")
+
+        kpi_row = html.Div([
+            kpi("Corrida", race_label),
+            kpi("Total de Voltas", total_laps),
+            kpi("Pilotos", total_drivers),
+            kpi("Melhor Volta", best_lap, best_lap_driver),
+        ], className="kpi-row", style={"marginBottom": "1.5rem"})
+
+        # ── Classificação Final ──────────────────────────────────
+        standings_rows = []
+        if (
+            "Position" in laps.columns
+            and "Driver" in laps.columns
+            and "LapNumber" in laps.columns
+        ):
+            final_pos = {}
+            for drv in laps["Driver"].unique():
+                drv_df = laps[laps["Driver"] == drv]
+                if drv_df.empty:
+                    continue
+                last_row = drv_df.loc[drv_df["LapNumber"].idxmax()]
+                pos = last_row["Position"]
+                if pd.notna(pos):
+                    final_pos[drv] = int(pos)
+            # build pos -> driver map and precompute total times so we can show gaps to leader
+            pos_to_drv = {p: d for d, p in final_pos.items()}
+
+            # helper to format gap as HH:MM:SS
+            def _fmt_gap(seconds):
+                if seconds is None or pd.isna(seconds):
+                    return "—"
+                secs = int(round(seconds))
+                h, rem = divmod(secs, 3600)
+                m, s = divmod(rem, 60)
+                return f"{h:02d}:{m:02d}:{s:02d}"
+
+            # format lap gap as MM:SS.ss (used for best-lap gaps)
+            def _fmt_lap_gap(seconds):
+                if seconds is None or pd.isna(seconds):
+                    return "—"
+                m, s = divmod(seconds, 60)
+                return f"{int(m):02d}:{s:05.2f}"
+
+            total_times = {}
+            if "LapTimeSeconds" in laps.columns:
+                for drv in final_pos.keys():
+                    drv_laps = laps[laps["Driver"] == drv]
+                    valid = drv_laps[drv_laps["LapTimeSeconds"].notna()]
+                    if not valid.empty:
+                        total_times[drv] = valid["LapTimeSeconds"].sum()
+                    else:
+                        total_times[drv] = None
+
+            leader_time = None
+            if 1 in pos_to_drv:
+                leader = pos_to_drv[1]
+                leader_time = total_times.get(leader)
+
+            for pos in sorted(final_pos.values()):
+                drv = next((d for d, p in final_pos.items() if p == pos), None)
+                if not drv:
+                    continue
+
+                team_name = ""
+                if "team" in laps.columns:
+                    t = laps[laps["Driver"] == drv]["team"].dropna()
+                    if not t.empty:
+                        team_name = str(t.iloc[0])
+
+                drv_color = get_driver_color(season, drv)
+                bg = _SURFACE if pos % 2 == 0 else "#FFFFFF"
+
+                # best lap and fastest flag (total_time retrieved from precomputed table)
+                total_time = total_times.get(drv) if isinstance(total_times, dict) else None
+                best_lap_drv = None
+                fastest_flag = False
+                if "LapTimeSeconds" in laps.columns:
+                    drv_laps = laps[laps["Driver"] == drv]
+                    valid = drv_laps[drv_laps["LapTimeSeconds"].notna()]
+                    if not valid.empty:
+                        best_lap_drv = valid["LapTimeSeconds"].min()
+                        fastest_flag = (best_lap_driver == drv)
+
+                # format totals: original total and gap to leader
+                display_total_original = _fmt_lap(total_time) if total_time is not None else "—"
+                if total_time is None:
+                    display_total = "—"
+                elif leader_time is None:
+                    display_total = _fmt_lap(total_time)
+                else:
+                    if pos == 1:
+                        display_total = "00:00:00"
+                    else:
+                        gap = total_time - leader_time
+                        display_total = f"+{_fmt_gap(gap)}"
+
+                # compute gap to best lap: leader = 00:00.00, others +MM:SS.ss
+                if best_lap_drv is None:
+                    display_best_lap_gap = "—"
+                elif best_lap_seconds is None:
+                    display_best_lap_gap = _fmt_lap(best_lap_drv)
+                else:
+                    if best_lap_driver and drv == best_lap_driver:
+                        display_best_lap_gap = "00:00:00"
+                    else:
+                        lap_gap = best_lap_drv - best_lap_seconds
+                        display_best_lap_gap = f"+{_fmt_lap_gap(lap_gap)}"
+
+                    standings_rows.append(html.Div([
+                            html.Span(f"P{pos}", style={"fontWeight": "800", "color": _PRIMARY, "flex": "0 0 36px", "fontSize": ".85rem"}),
+                            html.Span(drv, style={"fontWeight": "700", "color": drv_color, "flex": "0 0 64px", "fontFamily": "monospace, Inter, Arial", "fontSize": ".9rem"}),
+                            html.Span(team_name, style={"color": _MUTED, "fontSize": ".85rem", "flex": "1"}),
+                            html.Span(display_total_original, style={"flex": "0 0 86px", "textAlign": "center", "fontSize": ".85rem"}),
+                            html.Span(display_total, style={"flex": "0 0 86px", "textAlign": "center", "fontSize": ".85rem"}),
+                            html.Span(_fmt_lap(best_lap_drv) if best_lap_drv else "—", style={"flex": "0 0 74px", "textAlign": "center", "fontSize": ".85rem"}),
+                            html.Span(display_best_lap_gap, style={"flex": "0 0 86px", "textAlign": "center", "fontSize": ".85rem"}),
+                            html.Span("★" if fastest_flag else "", style={"color": "#F59E0B", "flex": "0 0 28px", "textAlign": "center"}),
+                    ], style={
+                        "display": "flex",
+                        "alignItems": "center",
+                        "gap": "1rem",
+                        "padding": ".42rem .75rem",
+                        "borderBottom": f"1px solid {_BORDER}",
+                        "background": bg,
+                    }))
+
+            # fallback: if we couldn't build standings from Position, try from total_times
+            if not standings_rows and total_times:
+                # order drivers by total time (None goes last)
+                ordered = sorted(total_times.items(), key=lambda kv: (kv[1] is None, kv[1]))
+                leader_time_fb = None
+                if ordered and ordered[0][1] is not None:
+                    leader_time_fb = ordered[0][1]
+
+                for idx, (drv, ttime) in enumerate(ordered, start=1):
+                    pos = idx
+                    team_name = ""
+                    if "team" in laps.columns:
+                        tt = laps[laps["Driver"] == drv]["team"].dropna()
+                        if not tt.empty:
+                            team_name = str(tt.iloc[0])
+
+                    drv_color = get_driver_color(season, drv)
+                    bg = _SURFACE if pos % 2 == 0 else "#FFFFFF"
+
+                    best_lap_drv = None
+                    fastest_flag = False
+                    if "LapTimeSeconds" in laps.columns:
+                        drv_laps = laps[laps["Driver"] == drv]
+                        valid = drv_laps[drv_laps["LapTimeSeconds"].notna()]
+                        if not valid.empty:
+                            best_lap_drv = valid["LapTimeSeconds"].min()
+                            fastest_flag = (best_lap_driver == drv)
+
+                    display_total_original = _fmt_lap(ttime) if ttime is not None else "—"
+                    if ttime is None:
+                        display_total = "—"
+                    elif leader_time_fb is None:
+                        display_total = _fmt_lap(ttime)
+                    else:
+                        if pos == 1:
+                            display_total = "00:00:00"
+                        else:
+                            gap = ttime - leader_time_fb
+                            display_total = f"+{_fmt_gap(gap)}"
+
+                    standings_rows.append(html.Div([
+                        html.Span(f"P{pos}", style={"fontWeight": "800", "color": _PRIMARY, "flex": "0 0 36px", "fontSize": ".85rem"}),
+                        html.Span(drv, style={"fontWeight": "700", "color": drv_color, "flex": "0 0 64px", "fontFamily": "monospace, Inter, Arial", "fontSize": ".9rem"}),
+                        html.Span(team_name, style={"color": _MUTED, "fontSize": ".85rem", "flex": "1"}),
+                        html.Span(display_total_original, style={"flex": "0 0 86px", "textAlign": "center", "fontSize": ".85rem"}),
+                        html.Span(display_total, style={"flex": "0 0 86px", "textAlign": "center", "fontSize": ".85rem"}),
+                        html.Span(_fmt_lap(best_lap_drv) if best_lap_drv else "—", style={"flex": "0 0 74px", "textAlign": "center", "fontSize": ".85rem"}),
+                        html.Span(display_best_lap_gap, style={"flex": "0 0 86px", "textAlign": "center", "fontSize": ".85rem"}),
+                        html.Span("★" if fastest_flag else "", style={"color": "#F59E0B", "flex": "0 0 28px", "textAlign": "center"}),
+                    ], style={"display": "flex", "alignItems": "center", "gap": "1rem", "padding": ".42rem .75rem", "borderBottom": f"1px solid {_BORDER}", "background": bg}))
+
+        # header for standings table
+        header_row = html.Div([
+            html.Span("Pos", style={"flex": "0 0 36px", "fontWeight": "700", "color": _MUTED, "textAlign": "center"}),
+            html.Span("Piloto", style={"flex": "0 0 64px", "fontWeight": "700", "color": _MUTED, "textAlign": "center"}),
+            html.Span("Equipe", style={"flex": "1", "fontWeight": "700", "color": _MUTED, "textAlign": "center"}),
+            html.Span("Tempo Total", style={"flex": "0 0 86px", "textAlign": "center", "fontWeight": "700", "color": _MUTED}),
+            html.Span("GAP Tempo Total", style={"flex": "0 0 86px", "textAlign": "center", "fontWeight": "700", "color": _MUTED}),
+            html.Span("Melhor Volta", style={"flex": "0 0 74px", "textAlign": "center", "fontWeight": "700", "color": _MUTED}),
+            html.Span("GAP Melhor Volta", style={"flex": "0 0 86px", "textAlign": "center", "fontWeight": "700", "color": _MUTED}),
+            html.Span("", style={"flex": "0 0 28px", "textAlign": "center", "fontWeight": "700", "color": _MUTED}),
+        ], style={"display": "flex", "alignItems": "center", "gap": "1rem", "padding": ".5rem .75rem", "borderBottom": f"1px solid {_BORDER}", "background": "#F9FAFB"})
+
+        standings = html.Div([
+            html.Div(
+                "Classificação Final",
+                style={
+                    "fontWeight": "700",
+                    "fontSize": ".78rem",
+                    "textTransform": "uppercase",
+                    "letterSpacing": ".06em",
+                    "color": _MUTED,
+                    "marginBottom": ".6rem",
+                },
+            ),
+            html.Div(
+                [header_row] + (standings_rows or [html.Div(
+                    "Dados de posição não disponíveis.",
+                    style={"color": _MUTED, "fontSize": ".9rem", "padding": ".5rem"},
+                )]),
+                style={
+                    "border": f"1px solid {_BORDER}",
+                    "borderRadius": "8px",
+                    "overflow": "hidden",
+                },
+            ),
+        ])
+
+        return html.Div([kpi_row, standings], style={"padding": ".25rem 0"})
+
+    except Exception as e:
+        print(f"Error building stats panel: {e}")
+        return html.Div(
+            "Erro ao carregar dados.",
+            style={"color": _MUTED, "padding": "1rem"},
+        )
 
 
 # ── Callbacks ───────────────────────────────────────────────────
@@ -68,6 +378,7 @@ layout = html.Div([
     Output("corrida-cache-warning", "children"),
     Input("corrida-page-trigger", "data"),
 )
+
 def load_seasons(_):
     try:
         seasons = client.get_available_seasons()
@@ -76,8 +387,12 @@ def load_seasons(_):
                 html.Span("⚠", className="alert-icon"),
                 html.Div([
                     html.Strong("Nenhum dado no cache SQLite."),
-                    html.P(["Execute: ", html.Code("python scripts/populate_cache.py --season 2024")],
-                           style={"margin": ".4rem 0 0"}),
+                    html.P(
+                        ["Execute: ", html.Code(
+                            "python scripts/populate_cache.py --season 2024"
+                        )],
+                        style={"margin": ".4rem 0 0"},
+                    ),
                 ]),
             ], className="alert alert-warning")
             return [], None, warning
@@ -89,12 +404,14 @@ def load_seasons(_):
             html.Span("✕", className="alert-icon"),
             html.Div([
                 html.Strong("Não foi possível conectar ao backend."),
-                html.P(["Certifique-se de que o servidor está rodando: ", html.Code("python main.py")],
-                       style={"margin": ".4rem 0 0"}),
+                html.P(
+                    ["Certifique-se de que o servidor está rodando: ",
+                     html.Code("python main.py")],
+                    style={"margin": ".4rem 0 0"},
+                ),
             ]),
         ], className="alert alert-error")
         return [], None, error
-
 
 @dash.callback(
     Output("corrida-race-dropdown", "options"),
@@ -129,69 +446,34 @@ def handle_load(n_clicks, season, race):
 
 
 @dash.callback(
-    Output("corrida-driver-dropdown", "options"),
+    Output("corrida-chart-area-content", "children"),
     Input("corrida-laps-store", "data"),
-)
-def update_drivers(laps_json):
-    if not laps_json:
-        return []
-    try:
-        laps = pd.read_json(io.StringIO(laps_json), orient="split")
-        drivers = sorted(laps["Driver"].unique().tolist()) if "Driver" in laps.columns else []
-        return [{"label": d, "value": d} for d in drivers]
-    except Exception:
-        return []
-
-
-@dash.callback(
-    Output("corrida-kpi-row", "children"),
-    Input("corrida-laps-store", "data"),
+    Input("corrida-chart-selector", "value"),
     State("corrida-session-store", "data"),
 )
-def update_kpis(laps_json, session_meta):
+def update_content(laps_json, chart_type, session_meta):
+    # ── Big Numbers ───────────────────────────────────────────────
+    if chart_type == "big-numbers":
+        return _build_stats_panel(laps_json, session_meta)
+
+    empty_fig = {
+        "data": [],
+        "layout": _base_layout("Nenhum dado carregado"),
+    }
     if not laps_json:
-        return []
+        return dcc.Graph(figure=empty_fig, config={"staticPlot": True})
+
     try:
         laps = pd.read_json(io.StringIO(laps_json), orient="split")
-        total_laps = int(laps["LapNumber"].max()) if "LapNumber" in laps.columns else "—"
-        total_drivers = len(laps["Driver"].unique()) if "Driver" in laps.columns else "—"
-        best_lap = "—"
-        if "LapTimeSeconds" in laps.columns:
-            val = laps["LapTimeSeconds"].min()
-            m, s = divmod(val, 60)
-            best_lap = f"{int(m)}:{s:05.2f}"
-        race_label = session_meta.get("race", "—") if session_meta else "—"
+        season = session_meta.get("season") if session_meta else None
 
-        def kpi(label, value):
-            return html.Div([
-                html.Div(label, className="kpi-label"),
-                html.Div(str(value), className="kpi-value"),
-            ], className="kpi")
+        if chart_type == "beeswarm":
+            fig = lap_time_beeswarm_chart(laps, season)
+        else:
+            fig = race_position_chart(laps, season)
 
-        return [
-            kpi("Corrida", race_label),
-            kpi("Total de Voltas", total_laps),
-            kpi("Pilotos", total_drivers),
-            kpi("Melhor Volta", best_lap),
-        ]
-    except Exception:
-        return []
+        return dcc.Graph(figure=fig, config={"staticPlot": True})
 
-
-@dash.callback(
-    Output("corrida-lap-time-graph", "figure"),
-    Output("corrida-position-graph", "figure"),
-    Output("corrida-speed-telemetry-graph", "figure"),
-    Input("corrida-driver-dropdown", "value"),
-    State("corrida-laps-store", "data"),
-)
-def update_charts(driver, laps_json):
-    empty_fig = {"data": [], "layout": {"template": "plotly_white", "title": "Nenhum dado carregado"}}
-    if not laps_json:
-        return empty_fig, empty_fig, empty_fig
-    try:
-        laps = pd.read_json(io.StringIO(laps_json), orient="split")
-        return lap_time_chart(laps, driver), position_chart(laps, driver), speed_telemetry_chart(pd.DataFrame())
     except Exception as e:
-        print(f"Error updating charts: {e}")
-        return empty_fig, empty_fig, empty_fig
+        print(f"Error updating corrida content: {e}")
+        return dcc.Graph(figure=empty_fig, config={"staticPlot": True})

@@ -262,6 +262,8 @@ def load_race_session(
             laps["Driver"] = laps["driver_code"]
         if "lap_number" in laps.columns:
             laps["LapNumber"] = laps["lap_number"]
+        if "position" in laps.columns:
+            laps["Position"] = laps["position"]
         
         # Session metadata
         session_data = {

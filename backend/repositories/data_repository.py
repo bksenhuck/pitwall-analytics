@@ -399,49 +399,8 @@ class DataRepository:
                         event_sessions: Dict[str, Any] = {"sessions": []}
 
                         for session_row in sessions:
-                            sid = session_row['id']
                             stype = session_row['session_type']
                             event_sessions["sessions"].append(stype)
-
-                            cursor.execute(
-                                "SELECT COUNT(*) as c FROM laps "
-                                "WHERE session_id = ?", (sid,)
-                            )
-                            lap_count = cursor.fetchone()['c']
-
-                            cursor.execute(
-                                "SELECT COUNT(*) as c FROM results "
-                                "WHERE session_id = ?", (sid,)
-                            )
-                            result_count = cursor.fetchone()['c']
-
-                            cursor.execute(
-                                "SELECT COUNT(*) as c FROM weather "
-                                "WHERE session_id = ?", (sid,)
-                            )
-                            weather_count = cursor.fetchone()['c']
-
-                            cursor.execute(
-                                "SELECT COUNT(*) as c FROM "
-                                "race_control_messages "
-                                "WHERE session_id = ?", (sid,)
-                            )
-                            message_count = cursor.fetchone()['c']
-
-                            cursor.execute(
-                                "SELECT COUNT(*) as c FROM telemetry t "
-                                "JOIN laps l ON t.lap_id = l.id "
-                                "WHERE l.session_id = ?", (sid,)
-                            )
-                            tel_count = cursor.fetchone()['c']
-
-                            event_sessions[stype] = {
-                                "laps": lap_count,
-                                "results": result_count,
-                                "weather": weather_count,
-                                "messages": message_count,
-                                "telemetry_samples": tel_count
-                            }
 
                         season_data[event_name] = event_sessions
 

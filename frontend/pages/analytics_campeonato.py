@@ -47,7 +47,6 @@ layout = html.Div([
     ], className="filters"),
 
     dcc.Store(id="camp-data-store", storage_type="session"),
-    dcc.Store(id="camp-laps-store", storage_type="session"),
     dcc.Store(id="camp-page-trigger", data={"loaded": True}),
 
     html.Div(id="camp-kpi-row", className="kpi-row"),
@@ -107,19 +106,17 @@ def load_seasons(_):
 
 @dash.callback(
     Output("camp-data-store", "data"),
-    Output("camp-laps-store", "data"),
     Input("camp-load-button", "n_clicks"),
     State("camp-season-dropdown", "value"),
     prevent_initial_call=True,
 )
 def load_data(n_clicks, season):
     if not n_clicks or not season:
-        return dash.no_update, dash.no_update
+        return dash.no_update
 
     try:
         races = client.get_races_for_season(season)
         results_rows = []
-        laps_rows = []
         for race in races:
             results = client.get_race_results(season, race)
             if not results.empty:
@@ -127,39 +124,20 @@ def load_data(n_clicks, season):
                 results["Race"] = race
                 results_rows.append(results)
 
-            laps, _, _ = client.load_race_session(season, race)
-            if laps is not None and not laps.empty:
-                laps = laps.copy()
-                laps["Race"] = race
-                laps_rows.append(laps)
+        if not results_rows:
+            return None
 
-        if not results_rows and not laps_rows:
-            return None, None
-
-        results_df = pd.concat(results_rows, ignore_index=True) if results_rows else pd.DataFrame()
-        if not results_df.empty:
-            results_df["points"] = pd.to_numeric(results_df["points"], errors="coerce").fillna(0)
-
-        laps_df = pd.concat(laps_rows, ignore_index=True) if laps_rows else pd.DataFrame()
-
-        return (
-            results_df.to_json(date_format="iso", orient="split") if not results_df.empty else None,
-            laps_df.to_json(date_format="iso", orient="split") if not laps_df.empty else None,
+        results_df = pd.concat(results_rows, ignore_index=True)
+        results_df["points"] = (
+            pd.to_numeric(results_df["points"], errors="coerce").fillna(0)
         )
+        return results_df.to_json(date_format="iso", orient="split")
     except Exception as e:
         print(f"Error loading championship data: {e}")
-        return None, None
+        return None
 
 
-def _fmt_lap(seconds):
-    try:
-        m, s = divmod(float(seconds), 60)
-        return f"{int(m)}:{s:05.2f}"
-    except Exception:
-        return "—"
-
-
-def _compute_figs(results_json, laps_json, season):
+def _compute_figs(results_json, season):
     import plotly.graph_objs as go
 
     empty = {"data": [], "layout": _base_layout("Nenhum dado carregado")}
@@ -178,7 +156,9 @@ def _compute_figs(results_json, laps_json, season):
     fig_drivers = go.Figure(go.Bar(
         x=driver_pts["driver_code"],
         y=driver_pts["points"],
-        marker_color=color_list_for_drivers(season, driver_pts["driver_code"].tolist()),
+        marker_color=color_list_for_drivers(
+            season, driver_pts["driver_code"].tolist()
+        ),
     ))
     fig_drivers.update_layout(**_base_layout(
         "Campeonato de Pilotos — Pontos na Temporada",
@@ -229,8 +209,14 @@ def _compute_figs(results_json, laps_json, season):
     ))
 
     # KPIs
-    leader_driver = driver_pts.iloc[0] if not driver_pts.empty else {"driver_code": "—", "points": 0}
-    leader_team = team_pts.iloc[0] if not team_pts.empty else {"team": "—"}
+    leader_driver = (
+        driver_pts.iloc[0]
+        if not driver_pts.empty
+        else {"driver_code": "—", "points": 0}
+    )
+    leader_team = (
+        team_pts.iloc[0] if not team_pts.empty else {"team": "—"}
+    )
 
     def kpi(label, value):
         return html.Div([
@@ -240,120 +226,41 @@ def _compute_figs(results_json, laps_json, season):
 
     kpis = [
         kpi("Líder (Pilotos)", leader_driver["driver_code"]),
-        kpi("Pontos", int(leader_driver["points"]) if "points" in leader_driver else 0),
-        kpi("Líder (Construtores)", leader_team["team"] if "team" in leader_team else "—"),
+        kpi(
+            "Pontos",
+            int(leader_driver["points"]) if "points" in leader_driver else 0,
+        ),
+        kpi(
+            "Líder (Construtores)",
+            leader_team["team"] if "team" in leader_team else "—",
+        ),
         kpi("Corridas", df["Race"].nunique()),
     ]
 
     return fig_drivers, fig_teams, fig_prog, kpis
 
 
-def _build_stats_panel(results_json, laps_json, season):
-    if not results_json and not laps_json:
-        return html.Div(
-            "Carregue dados do campeonato para ver os KPIs e classificação.",
-            style={"color": "#6B7280", "padding": "2rem", "fontSize": ".95rem"},
-        )
-
-    try:
-        results_df = pd.read_json(io.StringIO(results_json), orient="split") if results_json else pd.DataFrame()
-        laps_df = pd.read_json(io.StringIO(laps_json), orient="split") if laps_json else pd.DataFrame()
-
-        # KPIs (reuse compute)
-        _, _, _, kpis = _compute_figs(results_json, laps_json, season)
-
-        # Build standings: aggregate by driver
-        standings = []
-        if not results_df.empty:
-            driver_pts = (
-                results_df.groupby("driver_code")["points"].sum().reset_index()
-            )
-            # start from points ordering
-            driver_pts = driver_pts.sort_values("points", ascending=False)
-
-            # compute total time and best lap from laps_df if available
-            total_time = {}
-            best_lap = {}
-            fastest_indicator = {}
-            if not laps_df.empty and "LapTimeSeconds" in laps_df.columns:
-                # total time per driver (sum of lap times across all races)
-                grp = laps_df.groupby("Driver")["LapTimeSeconds"]
-                total_time = grp.sum().to_dict()
-                best_lap = grp.min().to_dict()
-
-                # fastest lap per race -> mark driver if they have the min lap in any race
-                fastest_indicator = {}
-                for race, sub in laps_df.groupby("Race"):
-                    valid = sub[sub["LapTimeSeconds"].notna()]
-                    if valid.empty:
-                        continue
-                    min_t = valid["LapTimeSeconds"].min()
-                    drivers = valid[valid["LapTimeSeconds"] == min_t]["Driver"].unique()
-                    for d in drivers:
-                        fastest_indicator[d] = True
-
-            # Build rows
-            for idx, row in driver_pts.iterrows():
-                drv = row["driver_code"]
-                pts = int(row["points"])
-                team = ""
-                # try to find team from results_df
-                t = results_df[results_df["driver_code"] == drv]["team"].dropna()
-                if not t.empty:
-                    team = str(t.iloc[0])
-
-                total = total_time.get(drv) or total_time.get(drv.upper()) or None
-                best = best_lap.get(drv) or best_lap.get(drv.upper()) or None
-                fastest = bool(fastest_indicator.get(drv) or fastest_indicator.get(drv.upper()))
-
-                standings.append(html.Div([
-                    html.Span(f"{pts} pts", style={"minWidth": "56px", "fontWeight": "700"}),
-                    html.Span(drv, style={"fontWeight": "700", "minWidth": "54px", "color": color_list_for_drivers(season, [drv])[0]}),
-                    html.Span(team, style={"color": "#6B7280", "flex": "1"}),
-                    html.Span(_fmt_lap(total) if total else "—", style={"minWidth": "86px", "textAlign": "right"}),
-                    html.Span(_fmt_lap(best) if best else "—", style={"minWidth": "74px", "textAlign": "right"}),
-                    html.Span("★" if fastest else "", style={"color": "#F59E0B", "minWidth": "28px", "textAlign": "center"}),
-                ], style={
-                    "display": "flex",
-                    "alignItems": "center",
-                    "gap": "1rem",
-                    "padding": ".42rem .75rem",
-                    "borderBottom": "1px solid #DDE1E7",
-                }))
-
-        standings_block = html.Div([
-            html.Div("Classificação Final", style={"fontWeight": "700", "fontSize": ".78rem", "textTransform": "uppercase", "letterSpacing": ".06em", "color": "#6B7280", "marginBottom": ".6rem"}),
-            html.Div(standings or html.Div("Dados não disponíveis.", style={"color": "#6B7280", "padding": ".5rem"}), style={"border": "1px solid #DDE1E7", "borderRadius": "8px", "overflow": "hidden"}),
-        ])
-
-        return html.Div([html.Div(kpis, style={"marginBottom": "1rem"}), standings_block], style={"padding": ".25rem 0"})
-
-    except Exception as e:
-        print(f"Error building championship stats panel: {e}")
-        return html.Div("Erro ao montar painel.", style={"color": "#6B7280", "padding": "1rem"})
-
-
 @dash.callback(
     Output("camp-chart-area-content", "children"),
     Input("camp-data-store", "data"),
-    Input("camp-laps-store", "data"),
     Input("camp-chart-selector", "value"),
     State("camp-season-dropdown", "value"),
 )
-def update_content(results_json, laps_json, chart_type, season):
-    # Big numbers / classification
-    if chart_type == "big-numbers":
-        return _build_stats_panel(results_json, laps_json, season)
-
-    # Otherwise build graphs on demand
-    fig_drivers, fig_teams, fig_prog, _ = _compute_figs(results_json, laps_json, season)
+def update_content(results_json, chart_type, season):
+    fig_drivers, fig_teams, fig_prog, _ = _compute_figs(results_json, season)
 
     empty_fig = {"data": [], "layout": _base_layout("Nenhum dado carregado")}
     if chart_type == "drivers":
-        return dcc.Graph(figure=(fig_drivers or empty_fig), config={"staticPlot": True})
+        return dcc.Graph(
+            figure=(fig_drivers or empty_fig), config={"staticPlot": True}
+        )
     if chart_type == "teams":
-        return dcc.Graph(figure=(fig_teams or empty_fig), config={"staticPlot": True})
+        return dcc.Graph(
+            figure=(fig_teams or empty_fig), config={"staticPlot": True}
+        )
     if chart_type == "progression":
-        return dcc.Graph(figure=(fig_prog or empty_fig), config={"staticPlot": True})
+        return dcc.Graph(
+            figure=(fig_prog or empty_fig), config={"staticPlot": True}
+        )
 
     return html.Div()

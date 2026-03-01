@@ -374,12 +374,6 @@ class DataRepository:
                         event_id = event_row['id']
                         event_name = event_row['event_name']
 
-                        if (
-                            'testing' in event_name.lower()
-                            or 'test' in event_name.lower()
-                        ):
-                            continue
-
                         cursor.execute("""
                             SELECT id, session_type
                             FROM sessions

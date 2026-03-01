@@ -113,7 +113,7 @@ layout = html.Div([
             dcc.Graph(
                 id="live-track-map",
                 config={"displayModeBar": False},
-                style={"height": "100%"},
+                style={"height": "520px", "width": "100%"},
             ),
         ], className="live-map"),
 
@@ -337,7 +337,7 @@ def _empty_map():
         paper_bgcolor='#0A0A14',
         xaxis=dict(visible=False),
         yaxis=dict(visible=False),
-        margin=dict(l=0, r=0, t=0, b=0),
+        margin=dict(l=8, r=8, t=8, b=8),
         height=520,
         uirevision='race',
     )
@@ -502,8 +502,8 @@ def _build_track_map(drivers, track_x, track_y):
                 line=dict(color='white', width=1.5)
             ),
             text=[d['driver']],
-            textposition='top center',
-            textfont=dict(color='white', size=9, family='monospace'),
+            textposition='middle center',
+            textfont=dict(color='white', size=8, family='monospace'),
             name=d['driver'],
             hovertemplate=(
                 f"<b>P{d['position']} {d['driver']}</b><br>"
@@ -524,6 +524,7 @@ def _build_track_map(drivers, track_x, track_y):
         yaxis_cfg['range'] = y_range
 
     fig.update_layout(
+        autosize=False,
         xaxis=xaxis_cfg,
         yaxis=yaxis_cfg,
         plot_bgcolor='#0A0A14',

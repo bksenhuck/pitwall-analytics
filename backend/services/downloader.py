@@ -76,9 +76,34 @@ class FastF1Downloader:
         """Fetch a single event."""
         return self._with_retry(ff1.get_event, season, event_name)
 
-    def get_session(self, season: int, event_name: str, session_type: str) -> Any:
-        """Fetch a session object (does not load data yet)."""
-        return self._with_retry(ff1.get_session, season, event_name, session_type)
+    def get_session(
+        self, season: int, event: "int | str", session_type: str
+    ) -> Any:
+        """Fetch a session object (does not load data yet).
+
+        *event* can be a round number (int, preferred — avoids fuzzy
+        matching) or an event name string.
+        """
+        return self._with_retry(
+            ff1.get_session, season, event, session_type
+        )
+
+    def get_testing_session(
+        self, season: int, test_number: int, session_number: int
+    ) -> Any:
+        """Fetch a pre-season testing session.
+
+        Uses fastf1.get_testing_session which bypasses event-name
+        lookup entirely, avoiding any fuzzy-matching redirects.
+
+        Args:
+            season: Season year (e.g. 2024).
+            test_number: Which pre-season test (usually 1).
+            session_number: Day of testing (1, 2 or 3).
+        """
+        return self._with_retry(
+            ff1.get_testing_session, season, test_number, session_number
+        )
 
     def load_session(self, session: Any, **load_kwargs) -> Any:
         """Load all requested data into a session object."""
@@ -114,19 +139,19 @@ class FastF1Downloader:
 
             except Exception as exc:
                 error_lower = str(exc).lower()
-                is_retryable = any(kw in error_lower for kw in _RATE_LIMIT_KEYWORDS)
+                is_retryable = any(
+                    kw in error_lower for kw in _RATE_LIMIT_KEYWORDS
+                )
 
                 if is_retryable and attempt < self.max_retries:
                     attempt += 1
                     logger.warning(
                         "Retryable error on attempt %d/%d (%s). Waiting %ds.",
-                        attempt,
-                        self.max_retries,
-                        exc,
-                        wait,
+                        attempt, self.max_retries, exc, wait,
                     )
                     print(
-                        f"\n  ⏳ Erro temporario (tentativa {attempt}/{self.max_retries}). "
+                        f"\n  ⏳ Erro temporario "
+                        f"(tentativa {attempt}/{self.max_retries}). "
                         f"Aguardando {wait}s antes de tentar novamente..."
                     )
                     time.sleep(wait)

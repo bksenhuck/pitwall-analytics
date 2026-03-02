@@ -241,6 +241,7 @@ def lap_time_beeswarm_chart(
 
     # Order: fastest median at bottom of chart
     team_medians = df.groupby(team_col)["LapTimeSeconds"].median()
+    team_means = df.groupby(team_col)["LapTimeSeconds"].mean()
     ordered_teams = team_medians.sort_values(ascending=True).index.tolist()
 
     # Shapes: background band + vertical median line per team
@@ -294,6 +295,35 @@ def lap_time_beeswarm_chart(
             hoverinfo="skip",
         ))
 
+    # Anotações de média à direita de cada linha
+    def _fmt_mean(secs):
+        h = int(secs // 3600)
+        rem = secs % 3600
+        m = int(rem // 60)
+        s = rem % 60
+        ms = round((s % 1) * 1000)
+        return f"{h}:{m:02d}:{int(s):02d}.{ms:03d}"
+
+    avg_annotations = [
+        dict(
+            text=_fmt_mean(team_means[team]),
+            x=1.01,
+            y=team,
+            xref="paper",
+            yref="y",
+            xanchor="left",
+            yanchor="middle",
+            showarrow=False,
+            font=dict(
+                color=get_team_color(team),
+                size=11,
+                family="monospace, Inter, Arial",
+            ),
+        )
+        for team in ordered_teams
+        if team in team_means
+    ]
+
     height = max(480, len(ordered_teams) * 62 + 130)
 
     layout = _base_layout(
@@ -313,14 +343,15 @@ def lap_time_beeswarm_chart(
         shapes=shapes,
         height=height,
         hovermode=False,
-        margin=dict(t=90, l=140, r=20, b=50),
+        margin=dict(t=90, l=140, r=110, b=50),
     )
+    layout["annotations"] = layout.get("annotations", []) + avg_annotations
     fig.update_layout(**layout)
     return fig
 
 
 def race_position_chart(
-    laps: pd.DataFrame, season: Optional[int] = None
+    laps: pd.DataFrame, season: Optional[int] = None, selected_driver: Optional[str] = None
 ) -> go.Figure:
     """
     Race position evolution for all drivers.
@@ -375,13 +406,39 @@ def race_position_chart(
     for drv in sorted(final_positions, key=lambda d: final_positions[d]):
         drv_laps = df[df["Driver"] == drv].sort_values("LapNumber")
         color = get_driver_color(season, drv)
+
+        is_active = selected_driver is None or drv == selected_driver
+        line_opacity = 1.0 if is_active else 0.1
+        line_width = 2.0 if is_active else 1.0
+
+        # customdata 2D: [posição, código_piloto] — usado no hover e no clickData
+        custom = [[int(pos), drv] for pos in drv_laps["Position"]]
+
+        # Trace largo invisível — captura hover e clicks
+        fig.add_trace(go.Scatter(
+            x=drv_laps["LapNumber"],
+            y=drv_laps["Position"],
+            customdata=custom,
+            mode="lines",
+            name=drv,
+            line=dict(color=color, width=5, shape="linear"),
+            opacity=0.01,
+            hoveron="points+fills",
+            showlegend=False,
+            hoverlabel=dict(bgcolor=color, font_size=14, font_family="Inter"),
+            hovertemplate="<b>%{customdata[1]}</b><br>Volta: %{x}<br>Posição: P%{customdata[0]}<extra></extra>"
+        ))
+
+        # Linha visível principal
         fig.add_trace(go.Scatter(
             x=drv_laps["LapNumber"],
             y=drv_laps["Position"],
             mode="lines",
             name=drv,
-            line=dict(color=color, width=1.5),
+            line=dict(color=color, width=line_width, shape="linear"),
+            opacity=line_opacity,
             hoverinfo="skip",
+            showlegend=False
         ))
 
     y_range = [n + 0.5, 0.5]
@@ -407,6 +464,7 @@ def race_position_chart(
     layout = _base_layout(
         "Evolução de Posição",
         xaxis_title="Volta",
+        # título sobrescrito abaixo
         yaxis=dict(
             tickvals=list(range(1, n + 1)),
             ticktext=left_ticktext,
@@ -420,13 +478,33 @@ def race_position_chart(
             ),
             title_font=dict(color=_MUTED),
             automargin=True,
+            # Permite interagir com os nomes dos pilotos no eixo Y
+            fixedrange=False,
         ),
         showlegend=False,
-        hovermode=False,
+        hovermode="closest",
+        dragmode=False, # Evita arrastar o gráfico por acidente ao clicar no eixo
+        hoverdistance=30,
         height=520,
-        margin=dict(t=90, l=60, r=70, b=50),
+        margin=dict(t=90, l=80, r=80, b=50), # Aumentei as margens laterais
     )
     layout["annotations"] = layout.get("annotations", []) + right_annotations
+
+    # Atualiza o texto do título para refletir o estado de seleção
+    if selected_driver:
+        title_html = (
+            f"<b>Evolução de Posição</b>"
+            f"  <span style='font-size:11px;color:#6B7280'>"
+            f"— {selected_driver} em destaque · clique novamente para resetar"
+            f"</span>"
+        )
+    else:
+        title_html = (
+            "<b>Evolução de Posição</b>"
+            "  <span style='font-size:11px;color:#6B7280'>clique em uma linha para destacar</span>"
+        )
+    layout["annotations"][0]["text"] = title_html
+
     fig.update_layout(**layout)
     return fig
 

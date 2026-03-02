@@ -48,6 +48,7 @@ layout = html.Div([
 
     dcc.Store(id="camp-data-store", storage_type="session"),
     dcc.Store(id="camp-page-trigger", data={"loaded": True}),
+    dcc.Store(id="camp-selected-driver"),
 
     html.Div(id="camp-kpi-row", className="kpi-row"),
 
@@ -69,7 +70,15 @@ layout = html.Div([
             ),
         ], className="chart-sidebar"),
 
-        html.Div(id="camp-chart-area-content", className="chart-area"),
+        html.Div([
+            html.Div(id="camp-chart-area-content"),
+            dcc.Graph(
+                id="camp-progression-graph",
+                figure={},
+                style={"display": "none"},
+                config={"displayModeBar": False, "scrollZoom": False},
+            ),
+        ], className="chart-area"),
     ], className="chart-workspace"),
 ])
 
@@ -156,6 +165,10 @@ def _compute_figs(results_json, season):
     fig_drivers = go.Figure(go.Bar(
         x=driver_pts["driver_code"],
         y=driver_pts["points"],
+        text=driver_pts["points"].astype(int),
+        textposition="outside",
+        cliponaxis=False,
+        textfont=dict(size=11, family="Inter, Arial, sans-serif"),
         marker_color=color_list_for_drivers(
             season, driver_pts["driver_code"].tolist()
         ),
@@ -165,6 +178,7 @@ def _compute_figs(results_json, season):
         xaxis_title="Piloto",
         yaxis_title="Pontos",
         showlegend=False,
+        yaxis=dict(autorange=True),
     ))
 
     # team points
@@ -177,6 +191,10 @@ def _compute_figs(results_json, season):
     fig_teams = go.Figure(go.Bar(
         x=team_pts["team"],
         y=team_pts["points"],
+        text=team_pts["points"].astype(int),
+        textposition="outside",
+        cliponaxis=False,
+        textfont=dict(size=11, family="Inter, Arial, sans-serif"),
         marker_color=color_list_for_teams(team_pts["team"].tolist()),
     ))
     fig_teams.update_layout(**_base_layout(
@@ -184,28 +202,7 @@ def _compute_figs(results_json, season):
         xaxis_title="Equipe",
         yaxis_title="Pontos",
         showlegend=False,
-    ))
-
-    # progression
-    df = df.sort_values("Race")
-    df["CumPoints"] = df.groupby("driver_code")["points"].cumsum()
-    top10 = driver_pts["driver_code"].head(10).tolist()
-    fig_prog = go.Figure()
-    for drv in top10:
-        sub = df[df["driver_code"] == drv]
-        color = color_list_for_drivers(season, [drv])[0]
-        fig_prog.add_trace(go.Scatter(
-            x=sub["Race"],
-            y=sub["CumPoints"],
-            mode="lines+markers",
-            name=drv,
-            line=dict(color=color, width=2),
-            marker=dict(size=6),
-        ))
-    fig_prog.update_layout(**_base_layout(
-        "Progressão de Pontos — Top 10 Pilotos",
-        xaxis_title="Corrida",
-        yaxis_title="Pontos acumulados",
+        yaxis=dict(autorange=True),
     ))
 
     # KPIs
@@ -237,30 +234,130 @@ def _compute_figs(results_json, season):
         kpi("Corridas", df["Race"].nunique()),
     ]
 
-    return fig_drivers, fig_teams, fig_prog, kpis
+    return fig_drivers, fig_teams, kpis
+
+
+def _build_progression_fig(results_json, season, selected_driver=None):
+    import plotly.graph_objs as go
+
+    empty = {"data": [], "layout": _base_layout("Nenhum dado carregado")}
+    if not results_json:
+        return empty
+
+    df = pd.read_json(io.StringIO(results_json), orient="split")
+
+    driver_pts = (
+        df.groupby("driver_code")["points"]
+        .sum()
+        .reset_index()
+        .sort_values("points", ascending=False)
+    )
+    top10 = driver_pts["driver_code"].head(10).tolist()
+
+    df = df.sort_values("Race")
+    df["CumPoints"] = df.groupby("driver_code")["points"].cumsum()
+
+    fig = go.Figure()
+    for drv in top10:
+        sub = df[df["driver_code"] == drv]
+        color = color_list_for_drivers(season, [drv])[0]
+        is_active = selected_driver is None or drv == selected_driver
+        fig.add_trace(go.Scatter(
+            x=sub["Race"],
+            y=sub["CumPoints"],
+            mode="lines+markers",
+            name=drv,
+            customdata=[[drv]] * len(sub),
+            line=dict(color=color, width=2.5 if is_active else 1.0),
+            marker=dict(size=7 if is_active else 4, color=color),
+            opacity=1.0 if is_active else 0.1,
+            hovertemplate="<b>%{customdata[0]}</b><br>Corrida: %{x}<br>Pontos: %{y}<extra></extra>",
+        ))
+
+    layout = _base_layout(
+        "Progressão de Pontos — Top 10 Pilotos",
+        xaxis_title="Corrida",
+        yaxis_title="Pontos acumulados",
+        hovermode="closest",
+    )
+    if selected_driver:
+        layout["annotations"][0]["text"] = (
+            f"<b>Progressão de Pontos</b>"
+            f"  <span style='font-size:11px;color:#6B7280'>"
+            f"— {selected_driver} em destaque · clique novamente para resetar"
+            f"</span>"
+        )
+    else:
+        layout["annotations"][0]["text"] = (
+            "<b>Progressão de Pontos — Top 10 Pilotos</b>"
+            "  <span style='font-size:11px;color:#6B7280'>clique em uma linha para destacar</span>"
+        )
+    fig.update_layout(**layout)
+    return fig
+
+
+@dash.callback(
+    Output("camp-data-store", "data", allow_duplicate=True),
+    Output("camp-selected-driver", "data", allow_duplicate=True),
+    Input("camp-load-button", "n_clicks"),
+    State("camp-season-dropdown", "value"),
+    prevent_initial_call=True,
+)
+def reset_selected_on_load(n_clicks, season):
+    # Delega o carregamento ao callback original; aqui só reseta o driver
+    return dash.no_update, None
 
 
 @dash.callback(
     Output("camp-chart-area-content", "children"),
+    Output("camp-chart-area-content", "style"),
+    Output("camp-progression-graph", "style"),
     Input("camp-data-store", "data"),
     Input("camp-chart-selector", "value"),
     State("camp-season-dropdown", "value"),
 )
 def update_content(results_json, chart_type, season):
-    fig_drivers, fig_teams, fig_prog, _ = _compute_figs(results_json, season)
-
+    SHOW = {"display": "block"}
+    HIDE = {"display": "none"}
     empty_fig = {"data": [], "layout": _base_layout("Nenhum dado carregado")}
-    if chart_type == "drivers":
-        return dcc.Graph(
-            figure=(fig_drivers or empty_fig), config={"staticPlot": True}
-        )
-    if chart_type == "teams":
-        return dcc.Graph(
-            figure=(fig_teams or empty_fig), config={"staticPlot": True}
-        )
-    if chart_type == "progression":
-        return dcc.Graph(
-            figure=(fig_prog or empty_fig), config={"staticPlot": True}
-        )
 
-    return html.Div()
+    if chart_type == "progression":
+        return None, HIDE, SHOW
+
+    fig_drivers, fig_teams, _ = _compute_figs(results_json, season)
+
+    if chart_type == "drivers":
+        return dcc.Graph(figure=(fig_drivers or empty_fig), config={"staticPlot": True}), SHOW, HIDE
+    if chart_type == "teams":
+        return dcc.Graph(figure=(fig_teams or empty_fig), config={"staticPlot": True}), SHOW, HIDE
+
+    return html.Div(), SHOW, HIDE
+
+
+@dash.callback(
+    Output("camp-progression-graph", "figure"),
+    Input("camp-data-store", "data"),
+    Input("camp-selected-driver", "data"),
+    State("camp-season-dropdown", "value"),
+    State("camp-chart-selector", "value"),
+)
+def update_progression_figure(results_json, selected_driver, season, chart_type):
+    if chart_type != "progression":
+        return dash.no_update
+    return _build_progression_fig(results_json, season, selected_driver)
+
+
+@dash.callback(
+    Output("camp-selected-driver", "data"),
+    Input("camp-progression-graph", "clickData"),
+    State("camp-selected-driver", "data"),
+    prevent_initial_call=True,
+)
+def handle_camp_driver_click(click_data, current_driver):
+    if not click_data or not click_data.get("points"):
+        return None
+    try:
+        driver = click_data["points"][0]["customdata"][0]
+        return None if driver == current_driver else driver
+    except (KeyError, IndexError, TypeError):
+        return None

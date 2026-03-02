@@ -9,7 +9,7 @@ from frontend.components.charts import (
     _base_layout,
 )
 from frontend.components.navigation import create_analytics_subnav
-from frontend.f1_config import get_driver_color
+from frontend.f1_config import get_driver_color, get_team_color
 from frontend.api import client
 
 dash.register_page(__name__, path="/analytics/corrida", name="Corrida")
@@ -65,6 +65,7 @@ layout = html.Div([
     dcc.Store(id="corrida-laps-store", storage_type="session"),
     dcc.Store(id="corrida-session-store", storage_type="session"),
     dcc.Store(id="corrida-page-trigger", data={"loaded": True}),
+    dcc.Store(id="corrida-selected-driver"),
 
     # ── Chart workspace ──────────────────────────────────────────
     html.Div([
@@ -85,8 +86,16 @@ layout = html.Div([
             ),
         ], className="chart-sidebar"),
 
-        # Chart area — content driven by callback
-        html.Div(id="corrida-chart-area-content", className="chart-area"),
+        # Chart area — conteúdo dinâmico + gráfico de posições com ID estável
+        html.Div([
+            html.Div(id="corrida-chart-area-content"),
+            dcc.Graph(
+                id="corrida-positions-graph",
+                figure={},
+                style={"display": "none"},
+                config={"displayModeBar": False, "scrollZoom": False},
+            ),
+        ], className="chart-area"),
     ], className="chart-workspace"),
 ])
 
@@ -96,6 +105,112 @@ layout = html.Div([
 def _fmt_lap(seconds):
     m, s = divmod(seconds, 60)
     return f"{int(m)}:{s:05.2f}"
+
+
+def _fmt_laptime_full(seconds):
+    """Formata segundos como H:MM:SS.mmm."""
+    h = int(seconds // 3600)
+    rem = seconds % 3600
+    m = int(rem // 60)
+    s = rem % 60
+    ms = round((s % 1) * 1000)
+    return f"{h}:{m:02d}:{int(s):02d}.{ms:03d}"
+
+
+def _build_team_avg_panel(laps: pd.DataFrame) -> html.Div:
+    """Painel lateral: equipe → barra → média, alinhado ao gráfico beeswarm."""
+    team_col = (
+        "team" if "team" in laps.columns and laps["team"].notna().any() else None
+    )
+    if team_col is None or "LapTimeSeconds" not in laps.columns:
+        return html.Div()
+
+    df = laps[laps["LapTimeSeconds"].notna() & (laps["LapTimeSeconds"] > 0)].copy()
+    if "is_accurate" in df.columns:
+        df = df[df["is_accurate"].isin([1, True])]
+    if df.empty:
+        return html.Div()
+
+    median = df["LapTimeSeconds"].median()
+    df = df[df["LapTimeSeconds"] < median * 1.6]
+
+    team_means = df.groupby(team_col)["LapTimeSeconds"].mean().sort_values()
+    if team_means.empty:
+        return html.Div()
+
+    min_avg = team_means.min()
+    max_avg = team_means.max()
+    span = max_avg - min_avg if max_avg != min_avg else 1.0
+
+    rows = []
+    for team, avg in team_means.items():
+        color = get_team_color(team)
+        bar_pct = int((1 - (avg - min_avg) / span) * 100)
+        rows.append(html.Div([
+            html.Span(team, style={
+                "flex": "0 0 110px",
+                "fontSize": ".8rem",
+                "fontWeight": "700",
+                "color": color,
+                "whiteSpace": "nowrap",
+                "overflow": "hidden",
+                "textOverflow": "ellipsis",
+            }),
+            html.Div(
+                html.Div(style={
+                    "width": f"{bar_pct}%",
+                    "height": "7px",
+                    "backgroundColor": color,
+                    "borderRadius": "4px",
+                }),
+                style={
+                    "flex": "1",
+                    "backgroundColor": "#E5E7EB",
+                    "borderRadius": "4px",
+                    "overflow": "hidden",
+                    "alignSelf": "center",
+                },
+            ),
+            html.Span(_fmt_laptime_full(avg), style={
+                "flex": "0 0 88px",
+                "fontFamily": "monospace, Inter, Arial",
+                "fontSize": ".8rem",
+                "color": color,
+                "fontWeight": "600",
+                "textAlign": "right",
+            }),
+        ], style={
+            "display": "flex",
+            "alignItems": "center",
+            "gap": ".5rem",
+            "padding": ".38rem .6rem",
+            "borderBottom": f"1px solid {_BORDER}",
+        }))
+
+    header = html.Div([
+        html.Span("Equipe", style={"flex": "0 0 110px", "fontWeight": "700", "color": _MUTED, "fontSize": ".72rem"}),
+        html.Span("", style={"flex": "1"}),
+        html.Span("Média", style={"flex": "0 0 88px", "textAlign": "right", "fontWeight": "700", "color": _MUTED, "fontSize": ".72rem"}),
+    ], style={
+        "display": "flex",
+        "alignItems": "center",
+        "gap": ".5rem",
+        "padding": ".38rem .6rem",
+        "background": "#F9FAFB",
+        "borderBottom": f"1px solid {_BORDER}",
+    })
+
+    return html.Div(
+        [header] + rows,
+        style={
+            "border": f"1px solid {_BORDER}",
+            "borderRadius": "8px",
+            "overflow": "hidden",
+            "flex": "0 0 310px",
+            "alignSelf": "flex-start",
+            "marginTop": "52px",  # alinha com a área do plot (abaixo da annotation de título)
+        },
+    )
 
 
 def _build_stats_panel(laps_json, session_meta):
@@ -427,53 +542,105 @@ def update_races(season):
 @dash.callback(
     Output("corrida-laps-store", "data"),
     Output("corrida-session-store", "data"),
+    Output("corrida-selected-driver", "data", allow_duplicate=True),
     Input("corrida-load-button", "n_clicks"),
+    Input("corrida-race-dropdown", "value"),
     State("corrida-season-dropdown", "value"),
-    State("corrida-race-dropdown", "value"),
     prevent_initial_call=True,
 )
-def handle_load(n_clicks, season, race):
+def handle_load(n_clicks, race, season):
+    ctx = dash.callback_context
+    triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
+
+    if triggered_id == "corrida-race-dropdown" and not race:
+        return None, None, None
+
     if not n_clicks or not season or not race:
-        return dash.no_update, dash.no_update
+        return dash.no_update, dash.no_update, dash.no_update
+
     laps, _, session = client.load_race_session(season, race)
     if laps.empty:
-        return None, None
+        return None, None, None
     return laps.to_json(date_format="iso", orient="split"), {
         "season": season,
         "race": race,
         "drivers": session.get("drivers", []),
-    }
+    }, None
 
 
 @dash.callback(
     Output("corrida-chart-area-content", "children"),
+    Output("corrida-chart-area-content", "style"),
+    Output("corrida-positions-graph", "style"),
     Input("corrida-laps-store", "data"),
     Input("corrida-chart-selector", "value"),
     State("corrida-session-store", "data"),
 )
 def update_content(laps_json, chart_type, session_meta):
-    # ── Big Numbers ───────────────────────────────────────────────
-    if chart_type == "big-numbers":
-        return _build_stats_panel(laps_json, session_meta)
+    SHOW = {"display": "block"}
+    HIDE = {"display": "none"}
 
-    empty_fig = {
-        "data": [],
-        "layout": _base_layout("Nenhum dado carregado"),
-    }
+    # Gráfico de posições tem ID estável e é gerenciado por callback separado
+    if chart_type == "positions":
+        return None, HIDE, SHOW
+
+    if chart_type == "big-numbers":
+        return _build_stats_panel(laps_json, session_meta), SHOW, HIDE
+
+    # beeswarm
+    empty_fig = {"data": [], "layout": _base_layout("Nenhum dado carregado")}
     if not laps_json:
-        return dcc.Graph(figure=empty_fig, config={"staticPlot": True})
+        return dcc.Graph(figure=empty_fig, config={"staticPlot": True}), SHOW, HIDE
 
     try:
         laps = pd.read_json(io.StringIO(laps_json), orient="split")
         season = session_meta.get("season") if session_meta else None
-
-        if chart_type == "beeswarm":
-            fig = lap_time_beeswarm_chart(laps, season)
-        else:
-            fig = race_position_chart(laps, season)
-
-        return dcc.Graph(figure=fig, config={"staticPlot": True})
+        fig = lap_time_beeswarm_chart(laps, season)
+        return dcc.Graph(
+            figure=fig,
+            config={"displayModeBar": False, "staticPlot": False, "scrollZoom": False},
+        ), SHOW, HIDE
 
     except Exception as e:
         print(f"Error updating corrida content: {e}")
-        return dcc.Graph(figure=empty_fig, config={"staticPlot": True})
+        return dcc.Graph(figure=empty_fig, config={"staticPlot": True}), SHOW, HIDE
+
+
+@dash.callback(
+    Output("corrida-positions-graph", "figure"),
+    Input("corrida-laps-store", "data"),
+    Input("corrida-selected-driver", "data"),
+    State("corrida-session-store", "data"),
+    State("corrida-chart-selector", "value"),
+)
+def update_positions_figure(laps_json, selected_driver, session_meta, chart_type):
+    if chart_type != "positions":
+        return dash.no_update
+
+    empty_fig = {"data": [], "layout": _base_layout("Evolução de Posição")}
+    if not laps_json:
+        return empty_fig
+
+    try:
+        laps = pd.read_json(io.StringIO(laps_json), orient="split")
+        season = session_meta.get("season") if session_meta else None
+        return race_position_chart(laps, season, selected_driver)
+    except Exception as e:
+        print(f"Error updating positions figure: {e}")
+        return empty_fig
+
+
+@dash.callback(
+    Output("corrida-selected-driver", "data"),
+    Input("corrida-positions-graph", "clickData"),
+    State("corrida-selected-driver", "data"),
+    prevent_initial_call=True,
+)
+def handle_driver_click(click_data, current_driver):
+    if not click_data or not click_data.get("points"):
+        return None
+    try:
+        driver = click_data["points"][0]["customdata"][1]
+        return None if driver == current_driver else driver
+    except (KeyError, IndexError, TypeError):
+        return None

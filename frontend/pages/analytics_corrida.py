@@ -6,6 +6,8 @@ import pandas as pd
 from frontend.components.charts import (
     lap_time_beeswarm_chart,
     race_position_chart,
+    rule_107_chart,
+    qualifying_elimination_chart,
     _base_layout,
 )
 from frontend.components.navigation import create_analytics_subnav
@@ -40,6 +42,8 @@ layout = html.Div([
                 id="corrida-season-dropdown",
                 options=[],
                 placeholder="Selecione a temporada",
+                persistence=True,
+                persistence_type="session",
             ),
         ], className="filter"),
 
@@ -49,6 +53,8 @@ layout = html.Div([
                 id="corrida-race-dropdown",
                 options=[],
                 placeholder="Selecione a corrida",
+                persistence=True,
+                persistence_type="session",
             ),
         ], className="filter"),
 
@@ -72,14 +78,30 @@ layout = html.Div([
         # Sidebar
         html.Div([
             html.Div("Visualizações", className="chart-sidebar-title"),
+            
+            html.Div("Corrida", style={"fontWeight": "bold", "fontSize": "0.85rem", "color": _MUTED, "marginTop": "1rem", "padding": "0 1rem"}),
             dcc.RadioItems(
                 id="corrida-chart-selector",
                 options=[
-                    {"label": "KPIs & Classificação", "value": "big-numbers"},
+                    {"label": "Resultados Corrida", "value": "big-numbers"},
                     {"label": "Tempos por Equipe", "value": "beeswarm"},
                     {"label": "Evolução de Posições", "value": "positions"},
                 ],
                 value="big-numbers",
+                className="chart-nav",
+                labelClassName="chart-nav-item",
+                inputClassName="chart-nav-radio",
+            ),
+
+            html.Div("Qualificação", style={"fontWeight": "bold", "fontSize": "0.85rem", "color": _MUTED, "marginTop": "1.5rem", "padding": "0 1rem"}),
+            dcc.RadioItems(
+                id="qualificacao-chart-selector",
+                options=[
+                    {"label": "Resultado Quali", "value": "qualy-results"},
+                    {"label": "Qualify", "value": "qualy-elimination"},
+                    {"label": "Regra dos 107%", "value": "rule-107"},
+                ],
+                value=None,
                 className="chart-nav",
                 labelClassName="chart-nav-item",
                 inputClassName="chart-nav-radio",
@@ -103,18 +125,86 @@ layout = html.Div([
 # ── Helpers ─────────────────────────────────────────────────────
 
 def _fmt_lap(seconds):
-    m, s = divmod(seconds, 60)
-    return f"{int(m)}:{s:05.2f}"
+    """Formata segundos em MM:SS.mmm para tabelas"""
+    if not seconds or pd.isna(seconds):
+        return "-"
+    m = int(seconds // 60)
+    s = int(seconds % 60)
+    ms = int((seconds % 1) * 1000)
+    return f"{m:02d}:{s:02d}.{ms:03d}"
 
 
 def _fmt_laptime_full(seconds):
-    """Formata segundos como H:MM:SS.mmm."""
-    h = int(seconds // 3600)
-    rem = seconds % 3600
-    m = int(rem // 60)
-    s = rem % 60
+    """Formata segundos em MM:SS.mmm (Mesma lógica do gráfico)"""
+    return _fmt_lap(seconds)
     ms = round((s % 1) * 1000)
     return f"{h}:{m:02d}:{int(s):02d}.{ms:03d}"
+
+
+def _build_qualy_results_table(laps: pd.DataFrame, session_meta: dict):
+    if laps.empty:
+        return html.Div("Nenhum dado disponível.", style={"padding": "2rem", "color": _MUTED})
+
+    # Obter o melhor tempo de cada piloto
+    best_laps = laps[laps["LapTimeSeconds"] > 0].sort_values("LapTimeSeconds").groupby("Driver").first().reset_index()
+    best_laps = best_laps.sort_values("LapTimeSeconds")
+    
+    if best_laps.empty:
+        return html.Div("Nenhum tempo registrado.", style={"padding": "2rem", "color": _MUTED})
+
+    # Calcular Gaps
+    best_overall = best_laps["LapTimeSeconds"].min()
+    best_laps["Gap"] = best_laps["LapTimeSeconds"] - best_overall
+    
+    # Header
+    header = html.Div([
+        html.Span("Pos", style={"flex": "0 0 45px", "fontWeight": "bold", "fontSize": ".75rem"}),
+        html.Span("Piloto", style={"flex": "0 0 80px", "fontWeight": "bold", "fontSize": ".75rem"}),
+        html.Span("Equipe", style={"flex": "1", "fontWeight": "bold", "fontSize": ".75rem"}),
+        html.Span("Tempo", style={"flex": "0 0 100px", "textAlign": "right", "fontWeight": "bold", "fontSize": ".75rem"}),
+        html.Span("Gap", style={"flex": "0 0 80px", "textAlign": "right", "fontWeight": "bold", "fontSize": ".75rem"}),
+    ], style={
+        "display": "flex",
+        "padding": "0.75rem 1rem",
+        "borderBottom": f"1px solid {_BORDER}",
+        "backgroundColor": "#F9FAFB",
+        "color": _MUTED,
+        "textTransform": "uppercase",
+        "letterSpacing": "0.025em"
+    })
+
+    rows = []
+    season = session_meta.get("season")
+    for i, (_, row) in enumerate(best_laps.iterrows()):
+        drv = row["Driver"]
+        team = row.get("team", "—")
+        drv_color = get_driver_color(season, drv)
+        
+        row_div = html.Div([
+            html.Span(f"{i+1}º", style={"flex": "0 0 45px", "fontWeight": "800", "color": _PRIMARY}),
+            html.Span(drv, style={"flex": "0 0 80px", "fontWeight": "700", "color": drv_color, "fontFamily": "monospace"}),
+            html.Span(team, style={"flex": "1", "color": _MUTED, "fontSize": "0.9rem"}),
+            html.Span(_fmt_lap(row["LapTimeSeconds"]), style={"flex": "0 0 100px", "textAlign": "right", "fontWeight": "600"}),
+            html.Span(f"+{row['Gap']:.3f}" if row['Gap'] > 0 else "—", style={"flex": "0 0 80px", "textAlign": "right", "color": _MUTED, "fontSize": "0.85rem"}),
+        ], style={
+            "display": "flex",
+            "padding": "0.85rem 1rem",
+            "borderBottom": f"1px solid {_BORDER}",
+            "alignItems": "center",
+            "backgroundColor": "white"
+        })
+        rows.append(row_div)
+
+    return html.Div([
+        header,
+        html.Div(rows)
+    ], style={
+        "border": f"1px solid {_BORDER}",
+        "borderRadius": "8px",
+        "overflow": "hidden",
+        "marginTop": "1.5rem",
+        "boxShadow": "0 1px 3px rgba(0,0,0,0.1)"
+    })
 
 
 def _build_team_avg_panel(laps: pd.DataFrame) -> html.Div:
@@ -235,6 +325,17 @@ def _build_stats_panel(laps_json, session_meta):
             len(laps["Driver"].unique())
             if "Driver" in laps.columns else "—"
         )
+        # ── Contagem de DNF ─────────────────────────────────────
+        dnf_count = 0
+        if "Position" in laps.columns and "LapNumber" in laps.columns:
+            # Um piloto é considerado DNF se sua última volta registrada
+            # for significativamente menor que a volta máxima da corrida
+            max_race_lap = laps["LapNumber"].max()
+            for drv in laps["Driver"].unique():
+                last_lap = laps[laps["Driver"] == drv]["LapNumber"].max()
+                if last_lap < max_race_lap:
+                    dnf_count += 1
+
         best_lap = "—"
         best_lap_driver = ""
         best_lap_seconds = None
@@ -266,8 +367,17 @@ def _build_stats_panel(laps_json, session_meta):
             kpi("Corrida", race_label),
             kpi("Total de Voltas", total_laps),
             kpi("Pilotos", total_drivers),
+            kpi("DNF", dnf_count) if dnf_count > 0 else kpi("Status", "Grid Completo"),
             kpi("Melhor Volta", best_lap, best_lap_driver),
-        ], className="kpi-row", style={"marginBottom": "1.5rem"})
+        ], className="kpi-row", style={
+            "marginBottom": "1.5rem",
+            "display": "flex",
+            "flexDirection": "row",
+            "flexWrap": "nowrap",
+            "gap": "1rem",
+            "width": "100%",
+            "overflowX": "auto"
+        })
 
         # ── Classificação Final ──────────────────────────────────
         standings_rows = []
@@ -299,10 +409,9 @@ def _build_stats_panel(laps_json, session_meta):
 
             # format lap gap as MM:SS.ss (used for best-lap gaps)
             def _fmt_lap_gap(seconds):
-                if seconds is None or pd.isna(seconds):
+                if seconds is None or pd.isna(seconds) or seconds == 0:
                     return "—"
-                m, s = divmod(seconds, 60)
-                return f"{int(m):02d}:{s:05.2f}"
+                return f"+{seconds:.3f}"
 
             total_times = {}
             if "LapTimeSeconds" in laps.columns:
@@ -352,10 +461,10 @@ def _build_stats_panel(laps_json, session_meta):
                     display_total = _fmt_lap(total_time)
                 else:
                     if pos == 1:
-                        display_total = "00:00:00"
+                        display_total = "—"
                     else:
                         gap = total_time - leader_time
-                        display_total = f"+{_fmt_gap(gap)}"
+                        display_total = f"+{gap:.3f}"
 
                 # compute gap to best lap: leader = 00:00.00, others +MM:SS.ss
                 if best_lap_drv is None:
@@ -364,10 +473,10 @@ def _build_stats_panel(laps_json, session_meta):
                     display_best_lap_gap = _fmt_lap(best_lap_drv)
                 else:
                     if best_lap_driver and drv == best_lap_driver:
-                        display_best_lap_gap = "00:00:00"
+                        display_best_lap_gap = "—"
                     else:
                         lap_gap = best_lap_drv - best_lap_seconds
-                        display_best_lap_gap = f"+{_fmt_lap_gap(lap_gap)}"
+                        display_best_lap_gap = _fmt_lap_gap(lap_gap)
 
                     standings_rows.append(html.Div([
                             html.Span(f"P{pos}", style={"fontWeight": "800", "color": _PRIMARY, "flex": "0 0 36px", "fontSize": ".85rem"}),
@@ -422,10 +531,10 @@ def _build_stats_panel(laps_json, session_meta):
                         display_total = _fmt_lap(ttime)
                     else:
                         if pos == 1:
-                            display_total = "00:00:00"
+                            display_total = "—"
                         else:
                             gap = ttime - leader_time_fb
-                            display_total = f"+{_fmt_gap(gap)}"
+                            display_total = f"+{gap:.3f}"
 
                     standings_rows.append(html.Div([
                         html.Span(f"P{pos}", style={"fontWeight": "800", "color": _PRIMARY, "flex": "0 0 36px", "fontSize": ".85rem"}),
@@ -440,13 +549,13 @@ def _build_stats_panel(laps_json, session_meta):
 
         # header for standings table
         header_row = html.Div([
-            html.Span("Pos", style={"flex": "0 0 36px", "fontWeight": "700", "color": _MUTED, "textAlign": "center"}),
-            html.Span("Piloto", style={"flex": "0 0 64px", "fontWeight": "700", "color": _MUTED, "textAlign": "center"}),
-            html.Span("Equipe", style={"flex": "1", "fontWeight": "700", "color": _MUTED, "textAlign": "center"}),
-            html.Span("Tempo Total", style={"flex": "0 0 86px", "textAlign": "center", "fontWeight": "700", "color": _MUTED}),
-            html.Span("GAP Tempo Total", style={"flex": "0 0 86px", "textAlign": "center", "fontWeight": "700", "color": _MUTED}),
-            html.Span("Melhor Volta", style={"flex": "0 0 74px", "textAlign": "center", "fontWeight": "700", "color": _MUTED}),
-            html.Span("GAP Melhor Volta", style={"flex": "0 0 86px", "textAlign": "center", "fontWeight": "700", "color": _MUTED}),
+            html.Span("Pos", style={"flex": "0 0 36px", "fontWeight": "700", "fontSize": ".7rem", "color": _MUTED, "textAlign": "center"}),
+            html.Span("Piloto", style={"flex": "0 0 64px", "fontWeight": "700", "fontSize": ".7rem", "color": _MUTED, "textAlign": "center"}),
+            html.Span("Equipe", style={"flex": "1", "fontWeight": "700", "fontSize": ".7rem", "color": _MUTED, "textAlign": "center"}),
+            html.Span("T. Total", style={"flex": "0 0 86px", "textAlign": "center", "fontSize": ".7rem", "fontWeight": "700", "color": _MUTED}),
+            html.Span("Gap Total", style={"flex": "0 0 86px", "textAlign": "center", "fontSize": ".7rem", "fontWeight": "700", "color": _MUTED}),
+            html.Span("M. Volta", style={"flex": "0 0 74px", "textAlign": "center", "fontSize": ".7rem", "fontWeight": "700", "color": _MUTED}),
+            html.Span("Gap Volta", style={"flex": "0 0 86px", "textAlign": "center", "fontSize": ".7rem", "fontWeight": "700", "color": _MUTED}),
             html.Span("", style={"flex": "0 0 28px", "textAlign": "center", "fontWeight": "700", "color": _MUTED}),
         ], style={"display": "flex", "alignItems": "center", "gap": "1rem", "padding": ".5rem .75rem", "borderBottom": f"1px solid {_BORDER}", "background": "#F9FAFB"})
 
@@ -542,30 +651,52 @@ def update_races(season):
 @dash.callback(
     Output("corrida-laps-store", "data"),
     Output("corrida-session-store", "data"),
-    Output("corrida-selected-driver", "data", allow_duplicate=True),
     Input("corrida-load-button", "n_clicks"),
-    Input("corrida-race-dropdown", "value"),
     State("corrida-season-dropdown", "value"),
+    State("corrida-race-dropdown", "value"),
+    State("corrida-chart-selector", "value"),
+    State("qualificacao-chart-selector", "value"),
     prevent_initial_call=True,
 )
-def handle_load(n_clicks, race, season):
-    ctx = dash.callback_context
-    triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
-
-    if triggered_id == "corrida-race-dropdown" and not race:
-        return None, None, None
-
+def handle_load(n_clicks, season, race, corrida_sel, qualy_sel):
     if not n_clicks or not season or not race:
-        return dash.no_update, dash.no_update, dash.no_update
-
-    laps, _, session = client.load_race_session(season, race)
+        return dash.no_update, dash.no_update
+    
+    # Decide qual sessão tentar primeiro com base no que o usuário está vendo
+    preferred = "Q" if qualy_sel else "R"
+    
+    laps, _, session = client.load_race_session(season, race, preferred_session=preferred)
     if laps.empty:
-        return None, None, None
+        return None, None
+    
     return laps.to_json(date_format="iso", orient="split"), {
         "season": season,
         "race": race,
         "drivers": session.get("drivers", []),
-    }, None
+        "session_type": session.get("session_type"),
+    }
+
+
+@dash.callback(
+    Output("corrida-chart-selector", "value"),
+    Output("qualificacao-chart-selector", "value"),
+    Input("corrida-chart-selector", "value"),
+    Input("qualificacao-chart-selector", "value"),
+    prevent_initial_call=True
+)
+def sync_chart_selectors(corrida_val, qualy_val):
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return dash.no_update, dash.no_update
+    
+    triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
+    
+    if triggered_id == "corrida-chart-selector":
+        return corrida_val, None
+    elif triggered_id == "qualificacao-chart-selector":
+        return None, qualy_val
+    
+    return dash.no_update, dash.no_update
 
 
 @dash.callback(
@@ -574,9 +705,12 @@ def handle_load(n_clicks, race, season):
     Output("corrida-positions-graph", "style"),
     Input("corrida-laps-store", "data"),
     Input("corrida-chart-selector", "value"),
+    Input("qualificacao-chart-selector", "value"),
     State("corrida-session-store", "data"),
 )
-def update_content(laps_json, chart_type, session_meta):
+def update_content(laps_json, corrida_chart, qualy_chart, session_meta):
+    chart_type = corrida_chart or qualy_chart
+    
     SHOW = {"display": "block"}
     HIDE = {"display": "none"}
 
@@ -587,7 +721,7 @@ def update_content(laps_json, chart_type, session_meta):
     if chart_type == "big-numbers":
         return _build_stats_panel(laps_json, session_meta), SHOW, HIDE
 
-    # beeswarm
+    # beeswarm / qualy
     empty_fig = {"data": [], "layout": _base_layout("Nenhum dado carregado")}
     if not laps_json:
         return dcc.Graph(figure=empty_fig, config={"staticPlot": True}), SHOW, HIDE
@@ -595,7 +729,20 @@ def update_content(laps_json, chart_type, session_meta):
     try:
         laps = pd.read_json(io.StringIO(laps_json), orient="split")
         season = session_meta.get("season") if session_meta else None
-        fig = lap_time_beeswarm_chart(laps, season)
+        
+        if chart_type == "rule-107":
+            fig = rule_107_chart(laps)
+        elif chart_type == "qualy-elimination":
+            fig = qualifying_elimination_chart(laps, season)
+            return dcc.Graph(
+                figure=fig,
+                config={"displayModeBar": False, "staticPlot": True},
+            ), SHOW, HIDE
+        elif chart_type == "qualy-results":
+            return _build_qualy_results_table(laps, session_meta), SHOW, HIDE
+        else: # beeswarm
+            fig = lap_time_beeswarm_chart(laps, season)
+        
         return dcc.Graph(
             figure=fig,
             config={"displayModeBar": False, "staticPlot": False, "scrollZoom": False},
@@ -609,38 +756,16 @@ def update_content(laps_json, chart_type, session_meta):
 @dash.callback(
     Output("corrida-positions-graph", "figure"),
     Input("corrida-laps-store", "data"),
-    Input("corrida-selected-driver", "data"),
+    Input("corrida-chart-selector", "value"),
     State("corrida-session-store", "data"),
-    State("corrida-chart-selector", "value"),
 )
-def update_positions_figure(laps_json, selected_driver, session_meta, chart_type):
-    if chart_type != "positions":
-        return dash.no_update
-
-    empty_fig = {"data": [], "layout": _base_layout("Evolução de Posição")}
-    if not laps_json:
-        return empty_fig
-
+def update_positions_graph(laps_json, chart_type, session_meta):
+    if chart_type != "positions" or not laps_json:
+        return {}
     try:
         laps = pd.read_json(io.StringIO(laps_json), orient="split")
         season = session_meta.get("season") if session_meta else None
-        return race_position_chart(laps, season, selected_driver)
+        return race_position_chart(laps, season=season)
     except Exception as e:
-        print(f"Error updating positions figure: {e}")
-        return empty_fig
-
-
-@dash.callback(
-    Output("corrida-selected-driver", "data"),
-    Input("corrida-positions-graph", "clickData"),
-    State("corrida-selected-driver", "data"),
-    prevent_initial_call=True,
-)
-def handle_driver_click(click_data, current_driver):
-    if not click_data or not click_data.get("points"):
-        return None
-    try:
-        driver = click_data["points"][0]["customdata"][1]
-        return None if driver == current_driver else driver
-    except (KeyError, IndexError, TypeError):
-        return None
+        print(f"Error updating positions graph: {e}")
+        return {}

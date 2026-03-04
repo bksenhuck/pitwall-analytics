@@ -4,7 +4,7 @@ Backend API client for frontend application.
 This module provides a clean interface to fetch data from the backend API.
 All data comes from the SQLite cache via the FastAPI backend.
 """
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 import requests
 import pandas as pd
 from frontend.config import BACKEND_API_URL, CACHE_DIR
@@ -276,7 +276,27 @@ def load_session(
 
 
 def load_race_session(
-    season: int, event_name: str
+    season: int, event_name: str, preferred_session: Optional[str] = None
 ) -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
-    """Load the Race session (R). Alias for load_session with session_type='R'."""
-    return load_session(season, event_name, "R")
+    """
+    Load session data based on context.
+    If preferred_session is provided, try that first.
+    Default: Q for Qualify rules, R for positions.
+    """
+    priority = [preferred_session] if preferred_session else ["Q", "R"]
+    # If no preference, we might want to try both, but if we are in "Positions"
+    # we definitely want "R". If we are in "Qualy", we want "Q".
+    for stype in priority:
+        if not stype: continue
+        laps, tel, meta = load_session(season, event_name, stype)
+        if not laps.empty:
+            return laps, tel, meta
+    
+    # Second pass fallback
+    for stype in ["Q", "R"]:
+        if stype == preferred_session: continue
+        laps, tel, meta = load_session(season, event_name, stype)
+        if not laps.empty:
+            return laps, tel, meta
+            
+    return pd.DataFrame(), pd.DataFrame(), {}

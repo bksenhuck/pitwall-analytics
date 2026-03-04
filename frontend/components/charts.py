@@ -22,6 +22,15 @@ _ACCENT = "#1565C0"   # --accent
 _TEXT = "#1A1A1A"     # --text
 _MUTED = "#6B7280"    # --muted
 
+def _fmt_laptime_full(seconds):
+    """Formata segundos em MM:SS.mmm"""
+    if not seconds or pd.isna(seconds):
+        return "-"
+    m = int(seconds // 60)
+    s = int(seconds % 60)
+    ms = int((seconds % 1) * 1000)
+    return f"{m:02d}:{s:02d}.{ms:03d}"
+
 # Paleta sequencial: azuis e cinzas
 PITWALL_COLORS = [
     "#003082",   # azul F1
@@ -370,8 +379,11 @@ def race_position_chart(
         fig.update_layout(**_base_layout("Evolução de Posição", height=520))
         return fig
 
-    df = laps[laps["Position"].notna() & laps["LapNumber"].notna()].copy()
+    # Filtrar apenas voltas com posição válida e garantir que seja numérico
+    df = laps.copy()
+    df = df[pd.to_numeric(df["Position"], errors="coerce").notna()].copy()
     df["Position"] = df["Position"].astype(int)
+    df = df[df["LapNumber"].notna()].copy()
 
     if df.empty:
         fig.update_layout(**_base_layout("Evolução de Posição", height=520))
@@ -381,10 +393,11 @@ def race_position_chart(
     final_positions = {}
     for drv in df["Driver"].unique():
         drv_df = df[df["Driver"] == drv]
-        last_row = drv_df.loc[drv_df["LapNumber"].idxmax()]
-        pos = last_row["Position"]
-        if pd.notna(pos):
-            final_positions[drv] = int(pos)
+        if not drv_df.empty:
+            last_row = drv_df.loc[drv_df["LapNumber"].idxmax()]
+            pos = last_row["Position"]
+            if pd.notna(pos):
+                final_positions[drv] = int(pos)
 
     if not final_positions:
         fig.update_layout(**_base_layout("Evolução de Posição", height=520))
@@ -406,39 +419,13 @@ def race_position_chart(
     for drv in sorted(final_positions, key=lambda d: final_positions[d]):
         drv_laps = df[df["Driver"] == drv].sort_values("LapNumber")
         color = get_driver_color(season, drv)
-
-        is_active = selected_driver is None or drv == selected_driver
-        line_opacity = 1.0 if is_active else 0.1
-        line_width = 2.0 if is_active else 1.0
-
-        # customdata 2D: [posição, código_piloto] — usado no hover e no clickData
-        custom = [[int(pos), drv] for pos in drv_laps["Position"]]
-
-        # Trace largo invisível — captura hover e clicks
-        fig.add_trace(go.Scatter(
-            x=drv_laps["LapNumber"],
-            y=drv_laps["Position"],
-            customdata=custom,
-            mode="lines",
-            name=drv,
-            line=dict(color=color, width=5, shape="linear"),
-            opacity=0.01,
-            hoveron="points+fills",
-            showlegend=False,
-            hoverlabel=dict(bgcolor=color, font_size=14, font_family="Inter"),
-            hovertemplate="<b>%{customdata[1]}</b><br>Volta: %{x}<br>Posição: P%{customdata[0]}<extra></extra>"
-        ))
-
-        # Linha visível principal
         fig.add_trace(go.Scatter(
             x=drv_laps["LapNumber"],
             y=drv_laps["Position"],
             mode="lines",
             name=drv,
-            line=dict(color=color, width=line_width, shape="linear"),
-            opacity=line_opacity,
+            line=dict(color=color, width=1.5),
             hoverinfo="skip",
-            showlegend=False
         ))
 
     y_range = [n + 0.5, 0.5]
@@ -478,15 +465,11 @@ def race_position_chart(
             ),
             title_font=dict(color=_MUTED),
             automargin=True,
-            # Permite interagir com os nomes dos pilotos no eixo Y
-            fixedrange=False,
         ),
         showlegend=False,
-        hovermode="closest",
-        dragmode=False, # Evita arrastar o gráfico por acidente ao clicar no eixo
-        hoverdistance=30,
+        hovermode=False,
         height=520,
-        margin=dict(t=90, l=80, r=80, b=50), # Aumentei as margens laterais
+        margin=dict(t=90, l=60, r=70, b=50),
     )
     layout["annotations"] = layout.get("annotations", []) + right_annotations
 
@@ -546,4 +529,297 @@ def driver_comparison_chart(
             font=dict(color=_TEXT),
         ),
     ))
+    return fig
+
+
+def rule_107_chart(laps: pd.DataFrame) -> go.Figure:
+    """
+    Gráfico demonstrando a regra dos 107% na Fórmula 1.
+    Recebe um conjunto de tempos de volta, calcula o limite de 107%
+    com base no melhor tempo e destaca quem está dentro/fora.
+    """
+    if laps.empty or "LapTimeSeconds" not in laps.columns:
+        fig = go.Figure()
+        fig.update_layout(**_base_layout("Regra dos 107%"))
+        return fig
+
+    # Filtrar voltas válidas (maiores que 0)
+    laps_valid = laps[laps["LapTimeSeconds"] > 0].copy()
+    
+    if laps_valid.empty:
+        fig = go.Figure()
+        fig.update_layout(**_base_layout("Regra dos 107%"))
+        return fig
+
+    # Considerar o melhor tempo de cada piloto na sessão
+    best_laps = (
+        laps_valid.groupby("Driver")["LapTimeSeconds"]
+        .min()
+        .reset_index()
+        .sort_values(by="LapTimeSeconds")
+    )
+
+    # Identificar pilotos que participaram mas não têm tempo válido
+    all_drivers = laps["Driver"].unique()
+    missing_drivers = [d for d in all_drivers if d not in best_laps["Driver"].values]
+    
+    if missing_drivers:
+        missing_df = pd.DataFrame({
+            "Driver": missing_drivers,
+            "LapTimeSeconds": [None] * len(missing_drivers),
+            "Percent": [115.0] * len(missing_drivers),
+            "WithinLimit": [False] * len(missing_drivers)
+        })
+        
+    best_session_time = best_laps["LapTimeSeconds"].min()
+    limit_107 = best_session_time * 1.07
+
+    # Converter para percentual
+    best_laps["Percent"] = (best_laps["LapTimeSeconds"] / best_session_time) * 100
+    best_laps["WithinLimit"] = best_laps["LapTimeSeconds"] <= limit_107
+    
+    if missing_drivers:
+        best_laps = pd.concat([best_laps, missing_df], ignore_index=True)
+
+    # Cores: Verde para dentro (107%), Vermelho para fora, Cinza para sem tempo
+    colors = []
+    for _, row in best_laps.iterrows():
+        if pd.isna(row["LapTimeSeconds"]):
+            colors.append("#9CA3AF")
+        elif row["WithinLimit"]:
+            colors.append("#10B981")
+        else:
+            colors.append("#EF4444")
+
+    fig = go.Figure()
+
+    # Adicionar as barras
+    fig.add_trace(go.Bar(
+        x=best_laps["Driver"],
+        y=best_laps["Percent"],
+        marker_color=colors,
+        text=best_laps["LapTimeSeconds"].apply(lambda x: _fmt_laptime_full(x) if pd.notna(x) else "Sem Tempo"),
+        textposition="auto",
+        name="Percentual do Melhor Tempo",
+        hovertemplate="Piloto: %{x}<br>Tempo: %{text}<br>Percentual: %{y:.2f}%<extra></extra>"
+    ))
+
+    # Linha horizontal de 107%
+    fig.add_shape(
+        type="line",
+        x0=-0.5,
+        x1=len(best_laps) - 0.5,
+        y0=107,
+        y1=107,
+        line=dict(color="#EF4444", width=3, dash="dash"),
+    )
+
+    # Anotação para a linha de 107%
+    fig.add_annotation(
+        x=len(best_laps) - 1,
+        y=107.5,
+        text="Limite 107%",
+        showarrow=False,
+        font=dict(color="#EF4444", weight="bold"),
+        bgcolor="white",
+        opacity=0.8
+    )
+
+    fig.update_layout(**_base_layout(
+        "Regra dos 107% - Classificação",
+        xaxis_title="Piloto",
+        yaxis_title="Percentual (%)",
+        height=500,
+        yaxis=dict(range=[95, max(110, best_laps["Percent"].max() or 110) + 2])
+    ))
+
+    return fig
+
+
+def qualifying_elimination_chart(laps: pd.DataFrame, season: int) -> go.Figure:
+    """
+    Gráfico estilo 'F1 Visualized' para sessões de Qualificação.
+    Mostra as etapas (Q1, Q2, Q3) e o posicionamento dos carros.
+    """
+    if laps.empty or "LapTimeSeconds" not in laps.columns:
+        fig = go.Figure()
+        fig.update_layout(**_base_layout("Eliminação da Qualificação"))
+        return fig
+
+    # Mapeamento de nomes de arquivo de imagem (ajustado para redbull.png, etc)
+    team_to_img = {
+        "Red Bull Racing": "redbull",
+        "Red Bull": "redbull",
+        "Ferrari": "ferrari",
+        "Mercedes": "mercedes",
+        "McLaren": "mclaren",
+        "Aston Martin": "aston_martin",
+        "Alpine": "alpine",
+        "Williams": "williams",
+        "Haas F1 Team": "haas",
+        "Haas": "haas",
+        "RB": "racing_bulls",
+        "Racing Bulls": "racing_bulls",
+        "Kick Sauber": "audi",
+        "Sauber": "audi",
+        "Alfa Romeo": "audi",
+        "Audi": "audi",
+        "Cadillac": "cadillac"
+    }
+
+    df = laps[laps["LapTimeSeconds"] > 0].copy()
+    best_results = df.sort_values("LapTimeSeconds").groupby("Driver").first().reset_index()
+    best_results = best_results.sort_values("LapTimeSeconds")
+
+    total_drivers = len(best_results)
+    
+    best_results["Phase"] = "Q1"
+    # Identificar quem participou de cada fase REALMENTE
+    # Q1: Todos (best_results já contém o melhor tempo de cada um)
+    # Q2: Top 15 (pelo tempo)
+    # Q3: Top 10 (pelo tempo)
+    # Mas no gráfico original "F1 Visualized", os carros do Q1 mostram o tempo do Q1, Q2 mostra Q2, etc.
+    # Como o seu dataframe já é o "best" por piloto, vamos apenas atribuir as zonas:
+    total_count = len(best_results)
+    if total_count > 0:
+        best_results.loc[best_results.index[0:min(10, total_count)], "Phase"] = "Q3"
+        if total_count > 10:
+            best_results.loc[best_results.index[10:min(15, total_count)], "Phase"] = "Q2"
+        if total_count > 15:
+            best_results.loc[best_results.index[15:], "Phase"] = "Q1"
+
+    fig = go.Figure()
+
+    phases = ["Q3", "Q2", "Q1"]
+    y_coords = {"Q3": 3, "Q2": 2, "Q1": 1}
+    
+    # Lógica de Distribuição Proporcional no Eixo Y
+    best_results["Y_Offset"] = 0.0
+    for phase in phases:
+        mask = best_results["Phase"] == phase
+        phase_subset = best_results[mask]
+        if not phase_subset.empty:
+            count = len(phase_subset)
+            if count > 1:
+                # Distribuir uniformemente por índice dentro do Q para evitar concentração
+                # (Mesmo que o tempo seja próximo, eles ocupam o espaço vertical do Q)
+                y_step = 0.7 / (count - 1) if count > 1 else 0
+                for idx_in_phase, (idx, row) in enumerate(phase_subset.iterrows()):
+                    # Primeiro do Q no topo (0.35), último na base (-0.35)
+                    offset = 0.35 - (idx_in_phase * y_step)
+                    best_results.at[idx, "Y_Offset"] = offset
+            else:
+                best_results.loc[mask, "Y_Offset"] = 0.0
+
+    best_overall = best_results["LapTimeSeconds"].min()
+
+    for phase in phases:
+        fig.add_shape(
+            type="rect",
+            x0=-1, x1=max(best_results["LapTimeSeconds"]) * 1.2,
+            y0=y_coords[phase] - 0.5, y1=y_coords[phase] + 0.5,
+            fillcolor="#E5E7EB" if phase == "Q2" else "#F3F4F6",
+            opacity=0.3,
+            line_width=0,
+            layer="below"
+        )
+        # Adicionar linhas tracejadas limitando o Q2 (superior e inferior)
+        if phase == "Q2":
+            # Linha superior do Q2 (limite com Q3)
+            fig.add_shape(
+                type="line",
+                x0=-1, x1=max(best_results["LapTimeSeconds"]) * 1.2,
+                y0=y_coords[phase] + 0.5, y1=y_coords[phase] + 0.5,
+                line=dict(color="#000000", width=1, dash="dash"),
+                layer="below"
+            )
+            # Linha inferior do Q2 (limite com Q1)
+            fig.add_shape(
+                type="line",
+                x0=-1, x1=max(best_results["LapTimeSeconds"]) * 1.2,
+                y0=y_coords[phase] - 0.5, y1=y_coords[phase] - 0.5,
+                line=dict(color="#000000", width=1, dash="dash"),
+                layer="below"
+            )
+
+    # Calcular gaps para os ticks do eixo X
+    max_time = best_results["LapTimeSeconds"].max()
+    x_range_min = best_overall - 0.2
+    x_range_max = max_time + 0.5
+
+    # Adicionar as imagens dos carros (cada um mostrando seu tempo)
+    for i, row in best_results.iterrows():
+        driver = row["Driver"]
+        team = row["team"] if "team" in row else ""
+        time = row["LapTimeSeconds"]
+        phase = row["Phase"]
+        y_final = y_coords[phase] + row["Y_Offset"]
+
+        img_name = team_to_img.get(team, "general")
+        img_path = f"/assets/static/images/{season}/cars_drawing/{img_name}.png"
+        
+        # Cálculo da posição X no modo "paper" (0 a 1) para manter tamanho FIXO da imagem
+        x_paper = (time - x_range_min) / (x_range_max - x_range_min) if (x_range_max - x_range_min) > 0 else 0
+
+        fig.add_layout_image(
+            dict(
+                source=img_path,
+                xref="paper", yref="y",
+                x=x_paper, y=y_final,
+                # sizex=0.07 significa 7% da largura TOTAL do gráfico, ignorando o zoom do eixo X
+                sizex=0.07, sizey=0.25, 
+                xanchor="center", yanchor="middle",
+                layer="above",
+                sizing="contain"
+            )
+        )
+
+        fig.add_annotation(
+            x=time, y=y_final + 0.12,
+            text=f"<b>{driver}</b>", # Removido tempo do topo para não poluir, já está no eixo e no hover
+            showarrow=False,
+            font=dict(size=9, color=_TEXT),
+            align="center"
+        )
+    
+    # Criar ticks: o primeiro é o tempo absoluto, os outros são +Gap
+    tick_vals = [best_overall]
+    tick_text = [_fmt_laptime_full(best_overall)]
+    
+    # Adiciona ticks a cada 2s para não poluir se a diferença for pequena, ou 5s se for grande
+    import numpy as np
+    diff = x_range_max - best_overall
+    step = 2.0 if diff < 20 else 5.0
+    
+    current_tick = best_overall + step
+    while current_tick <= x_range_max:
+        tick_vals.append(current_tick)
+        tick_text.append(f"+{int(current_tick - best_overall)}s")
+        current_tick += step
+
+    fig.update_layout(**_base_layout(
+        "Eliminação da Qualificação",
+        xaxis_title="Tempo / Gap para Pole",
+        yaxis=dict(
+            tickvals=[1, 2, 3],
+            ticktext=["Q1", "Q2", "Q3"],
+            range=[0.5, 3.5],
+            fixedrange=True
+        ),
+        xaxis=dict(
+            tickvals=tick_vals,
+            ticktext=tick_text,
+            range=[x_range_min, x_range_max],
+            fixedrange=True,
+            showgrid=True,
+            gridcolor="#E5E7EB",
+            gridwidth=1,
+            griddash="dot"
+        ),
+        height=600,
+        showlegend=False,
+        dragmode=False,
+        hovermode=False
+    ))
+
     return fig

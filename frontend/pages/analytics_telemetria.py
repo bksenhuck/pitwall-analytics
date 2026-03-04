@@ -43,6 +43,8 @@ layout = html.Div([
                 id="tele-season-dropdown",
                 options=[],
                 placeholder="Selecione a temporada",
+                persistence=True,
+                persistence_type="session",
             ),
         ], className="filter"),
 
@@ -53,6 +55,8 @@ layout = html.Div([
                 options=[],
                 placeholder="Todas as corridas",
                 clearable=True,
+                persistence=True,
+                persistence_type="session",
             ),
         ], className="filter"),
 
@@ -63,6 +67,8 @@ layout = html.Div([
                 options=_SESSION_OPTIONS,
                 value="R",
                 clearable=False,
+                persistence=True,
+                persistence_type="session",
             ),
         ], className="filter"),
 
@@ -73,6 +79,8 @@ layout = html.Div([
                 options=[],
                 placeholder="Todos os pilotos",
                 multi=True,
+                persistence=True,
+                persistence_type="session",
             ),
         ], className="filter"),
 

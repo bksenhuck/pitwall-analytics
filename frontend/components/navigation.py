@@ -24,6 +24,7 @@ def create_analytics_subnav(active_path: str = None):
     """Sub-navigation bar shown inside all /analytics/* pages."""
     links = [
         {"label": "Corrida",    "href": "/analytics/corrida"},
+        {"label": "Qualificação", "href": "/analytics/qualificacao"},
         {"label": "Telemetria", "href": "/analytics/telemetria"},
         {"label": "Campeonato", "href": "/analytics/campeonato"},
     ]

@@ -5,7 +5,10 @@ __pycache__/
 
 # C extensions
 *.so
-
+# Virtual environment
+venv/
+venv_pitwall_analytics/
+.env
 # Distribution / packaging
 .Python
 build/

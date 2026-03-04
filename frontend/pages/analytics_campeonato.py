@@ -33,6 +33,8 @@ layout = html.Div([
                 id="camp-season-dropdown",
                 options=[],
                 placeholder="Selecione a temporada",
+                persistence=True,
+                persistence_type="session",
             ),
         ], className="filter"),
 
@@ -252,18 +254,25 @@ def _build_progression_fig(results_json, season, selected_driver=None):
         .reset_index()
         .sort_values("points", ascending=False)
     )
-    top10 = driver_pts["driver_code"].head(10).tolist()
+    # Pegar todos os pilotos que pontuaram para não faltar ninguém no gráfico
+    all_scored = driver_pts[driver_pts["points"] > 0]["driver_code"].tolist()
+    
+    # Se houver muitos pilotos (ex: mais de 20), podemos limitar, mas para F1 10 é pouco.
+    # Vamos mostrar todos os que pontuaram na temporada.
+    display_drivers = all_scored if all_scored else driver_pts["driver_code"].head(20).tolist()
 
     df = df.sort_values("Race")
+    # Remover " Grand Prix" para encurtar o eixo X
+    df["RaceShort"] = df["Race"].str.replace(" Grand Prix", "", case=False)
     df["CumPoints"] = df.groupby("driver_code")["points"].cumsum()
 
     fig = go.Figure()
-    for drv in top10:
+    for drv in display_drivers:
         sub = df[df["driver_code"] == drv]
         color = color_list_for_drivers(season, [drv])[0]
         is_active = selected_driver is None or drv == selected_driver
         fig.add_trace(go.Scatter(
-            x=sub["Race"],
+            x=sub["RaceShort"],
             y=sub["CumPoints"],
             mode="lines+markers",
             name=drv,
@@ -275,7 +284,7 @@ def _build_progression_fig(results_json, season, selected_driver=None):
         ))
 
     layout = _base_layout(
-        "Progressão de Pontos — Top 10 Pilotos",
+        "Progressão de Pontos na Temporada",
         xaxis_title="Corrida",
         yaxis_title="Pontos acumulados",
         hovermode="closest",
@@ -289,9 +298,14 @@ def _build_progression_fig(results_json, season, selected_driver=None):
         )
     else:
         layout["annotations"][0]["text"] = (
-            "<b>Progressão de Pontos — Top 10 Pilotos</b>"
+            "<b>Progressão de Pontos na Temporada</b>"
             "  <span style='font-size:11px;color:#6B7280'>clique em uma linha para destacar</span>"
         )
+    
+    # Aumentar altura do gráfico
+    layout["height"] = 650
+    layout["margin"] = dict(t=80, b=120, l=60, r=40) # Aumentar margem inferior para nomes inclinados
+    
     fig.update_layout(**layout)
     return fig
 

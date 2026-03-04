@@ -348,3 +348,44 @@ def color_list_for_teams(team_names: list) -> list:
     Return a list of hex colors, one per team name / alias.
     """
     return [get_team_color(t) for t in team_names]
+
+
+# ── Driver full names ──────────────────────────────────────────────────────────
+
+DRIVER_FULL_NAMES: dict = {
+    "ALB": "Alexander Albon",
+    "ALO": "Fernando Alonso",
+    "ANT": "Kimi Antonelli",
+    "BEA": "Oliver Bearman",
+    "BOT": "Valtteri Bottas",
+    "BOR": "Gabriel Bortoleto",
+    "COL": "Franco Colapinto",
+    "DEV": "Nyck de Vries",
+    "DOO": "Jack Doohan",
+    "GAS": "Pierre Gasly",
+    "HAD": "Isack Hadjar",
+    "HAM": "Lewis Hamilton",
+    "HUL": "Nico Hulkenberg",
+    "IWA": "Ayumu Iwasa",
+    "LAW": "Liam Lawson",
+    "LEC": "Charles Leclerc",
+    "MAG": "Kevin Magnussen",
+    "MAR": "Mick Schumacher",
+    "NOR": "Lando Norris",
+    "OCO": "Esteban Ocon",
+    "PER": "Sergio Perez",
+    "PIA": "Oscar Piastri",
+    "RIC": "Daniel Ricciardo",
+    "RUS": "George Russell",
+    "SAI": "Carlos Sainz",
+    "SAR": "Logan Sargeant",
+    "STR": "Lance Stroll",
+    "TSU": "Yuki Tsunoda",
+    "VER": "Max Verstappen",
+    "ZHO": "Guanyu Zhou",
+}
+
+
+def get_driver_full_name(driver_code: str) -> str:
+    """Return the full name for a driver code, or the code itself if unknown."""
+    return DRIVER_FULL_NAMES.get(driver_code.upper(), driver_code)

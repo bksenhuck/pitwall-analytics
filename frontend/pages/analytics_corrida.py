@@ -83,7 +83,7 @@ layout = html.Div([
             dcc.RadioItems(
                 id="corrida-chart-selector",
                 options=[
-                    {"label": "Resultados Corrida", "value": "big-numbers"},
+                    {"label": "Resultados", "value": "big-numbers"},
                     {"label": "Tempos por Equipe", "value": "beeswarm"},
                     {"label": "Evolução de Posições", "value": "positions"},
                 ],
@@ -97,7 +97,7 @@ layout = html.Div([
             dcc.RadioItems(
                 id="qualificacao-chart-selector",
                 options=[
-                    {"label": "Resultado Quali", "value": "qualy-results"},
+                    {"label": "Resultados", "value": "qualy-results"},
                     {"label": "Qualify", "value": "qualy-elimination"},
                     {"label": "Regra dos 107%", "value": "rule-107"},
                 ],
@@ -652,14 +652,24 @@ def update_races(season):
     Output("corrida-laps-store", "data"),
     Output("corrida-session-store", "data"),
     Input("corrida-load-button", "n_clicks"),
+    Input("corrida-race-dropdown", "value"),
     State("corrida-season-dropdown", "value"),
-    State("corrida-race-dropdown", "value"),
     State("corrida-chart-selector", "value"),
     State("qualificacao-chart-selector", "value"),
-    prevent_initial_call=True,
 )
-def handle_load(n_clicks, season, race, corrida_sel, qualy_sel):
-    if not n_clicks or not season or not race:
+def handle_load(n_clicks, race, season, corrida_sel, qualy_sel):
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return dash.no_update, dash.no_update
+    
+    triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
+
+    # Se mudar a corrida no dropdown e for para vazio, resetar stores
+    if triggered_id == "corrida-race-dropdown" and not race:
+        return None, None
+
+    # Se for o botão ou mudança no dropdown para uma corrida válida
+    if not season or not race:
         return dash.no_update, dash.no_update
     
     # Decide qual sessão tentar primeiro com base no que o usuário está vendo

@@ -6,9 +6,33 @@ Reads exclusively from SQLite cache populated by populate_cache.py.
 from fastapi import APIRouter, HTTPException, Query
 from typing import Dict, Any, Optional
 from backend.services.f1_data_service import F1DataService
+from backend.services.telemetry_service import TelemetryService
 
 router = APIRouter()
 f1_service = F1DataService()
+telemetry_service = TelemetryService()
+
+
+@router.get('/data/telemetry/head-to-head')
+async def get_telemetry_h2h(
+    year: int = Query(..., description="Season year"),
+    gp: str = Query(..., description="Event name/round"),
+    session_type: str = Query('R', description="R, Q, FP..."),
+    drivers: str = Query(..., description="Comma-separated driver codes"),
+) -> Dict[str, Any]:
+    """Get synchronized telemetry for N drivers on a common distance axis."""
+    driver_list = [d.strip().upper() for d in drivers.split(",") if d.strip()]
+    if not driver_list:
+        raise HTTPException(status_code=400, detail="At least 1 driver code required")
+    try:
+        return telemetry_service.get_head_to_head_telemetry(
+            year=year,
+            gp=gp,
+            session_type=session_type,
+            drivers=driver_list,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get('/data/available')

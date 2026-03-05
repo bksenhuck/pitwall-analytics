@@ -5,7 +5,7 @@ from plotly.subplots import make_subplots
 import requests
 
 from frontend.components.navigation import create_analytics_subnav
-from frontend.components.charts import _base_layout
+from frontend.components.charts import _base_layout, _fmt_laptime_full
 from frontend.api import client
 from frontend.f1_config import get_driver_color, get_driver_full_name
 from frontend.config import BACKEND_API_URL
@@ -266,11 +266,12 @@ def update_telemetry(n_clicks, year, gp, session_type, selected_drivers):
 
         for _, subplot_row, y_label in plot_configs:
             fig.update_yaxes(
-                title_text=y_label, title_font=dict(color=_MUTED, size=11),
+                title_text=f"<b>{y_label}</b>", 
+                title_font=dict(color=_TEXT, size=14),
                 row=subplot_row, col=1,
                 showgrid=False, zeroline=False,
                 linecolor=_BORDER,
-                tickfont=dict(color=_MUTED, size=11),
+                tickfont=dict(color=_MUTED, size=12),
             )
             for corner in corners:
                 fig.add_vline(
@@ -291,21 +292,20 @@ def update_telemetry(n_clicks, year, gp, session_type, selected_drivers):
             paper_bgcolor=_BG,
             plot_bgcolor=_BG,
             font=dict(color=_TEXT, family="Inter, Arial, sans-serif", size=12),
-            title=dict(
-                text=(
-                    f"<b>Telemetria F1</b>  "
-                    f"<span style='font-size:13px; color:{_MUTED}'>"
-                    f"{meta['event']} · {meta['session']} · {drivers_label}</span>"
-                ),
-                x=0, xanchor="left",
-                font=dict(color="#003082", size=14),
-            ),
+            title=dict(text=""), # Removido título nativo (linha de texto)
             height=1400,
-            margin=dict(t=100, b=60, l=80, r=40),
+            # Margem superior aumentada para dar mais espaço à legenda
+            margin=dict(t=150, b=60, l=80, r=40),
             hovermode="x unified",
+            # Legenda centralizada e mais distante do gráfico (y subiu)
             legend=dict(
-                orientation="h", yanchor="bottom", y=1.015, xanchor="right", x=1,
-                bgcolor="rgba(0,0,0,0)", font=dict(color=_TEXT),
+                orientation="h",
+                yanchor="bottom",
+                y=1.05,
+                xanchor="center",
+                x=0.5,
+                bgcolor="rgba(0,0,0,0)",
+                font=dict(color=_TEXT),
             ),
         )
         fig.update_xaxes(
@@ -318,19 +318,22 @@ def update_telemetry(n_clicks, year, gp, session_type, selected_drivers):
         info = html.Div([
             html.Div(
                 [
-                    html.Span(
-                        f"{get_driver_full_name(drv)} ({drv}): {lap_times.get(drv, '—')}",
-                        style={"color": colors[drv], "fontWeight": "bold", "fontSize": "1.2rem"},
-                    )
+                    html.Div([
+                        html.Div(f"{get_driver_full_name(drv)} ({drv})", style={"fontSize": "0.9rem", "color": _MUTED}),
+                        html.Div(
+                            _fmt_laptime_full(lap_times.get(drv)), 
+                            style={"color": colors[drv], "fontWeight": "bold", "fontSize": "1.3rem"}
+                        ),
+                    ], style={"textAlign": "center", "minWidth": "150px"})
                     for drv in selected_drivers
                 ],
                 style={
-                    "display": "inline-flex", "gap": "2rem", "flexWrap": "wrap",
+                    "display": "flex", 
+                    "gap": "3rem", 
+                    "flexWrap": "wrap",
                     "justifyContent": "center",
-                    "padding": "1rem",
-                    "backgroundColor": _BG,
-                    "border": f"1px solid {_BORDER}",
-                    "borderRadius": "8px",
+                    "padding": "1.5rem 0",
+                    "marginBottom": "1rem"
                 }
             )
         ])

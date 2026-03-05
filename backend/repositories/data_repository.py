@@ -5,12 +5,20 @@ All methods take a `season` parameter to open the correct DB file.
 Season discovery is done by scanning the data/ directory for
 pitwall_{year}.db files.
 """
+import os
+import pandas as pd
 from backend.db.session import get_db_connection, get_available_season_dbs
 from typing import Optional, List, Dict, Any
 
 
 class DataRepository:
     """Repository for F1 data using per-season normalized schema"""
+
+    # Local storage for optimized files
+    TELEMETRY_DATA_DIR = os.path.join("data", "telemetry")
+    LAPS_DATA_DIR      = os.path.join("data", "laps")
+    WEATHER_DATA_DIR   = os.path.join("data", "weather")
+    RESULTS_DATA_DIR   = os.path.join("data", "results")
 
     # ===== SEASON METHODS =====
 
@@ -194,9 +202,41 @@ class DataRepository:
         session_id: int,
         driver_filter: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """Get laps for a session, optionally filtered by driver."""
+        """
+        Get laps for a session, optionally filtered by driver.
+        Tries Event-based Parquet first, falls back to SQLite.
+        """
+        # 1. Resolver qual o event_id dessa sessão
         with get_db_connection(season) as conn:
             cursor = conn.cursor()
+            cursor.execute("SELECT event_id FROM sessions WHERE id = ?", (session_id,))
+            row = cursor.fetchone()
+            if not row: return []
+            event_id = row['event_id']
+
+        # 2. Try Event Parquet
+        parquet_path = os.path.join(
+            DataRepository.LAPS_DATA_DIR,
+            str(season),
+            f"event_{event_id}.parquet"
+        )
+        if os.path.exists(parquet_path):
+            try:
+                df = pd.read_parquet(parquet_path)
+                # Filtrar pela sessão específica dentro do evento
+                df = df[df['session_id'] == session_id]
+                
+                if driver_filter:
+                    mask = (df['driver_code'] == driver_filter) | (df['driver_number'] == str(driver_filter))
+                    df = df[mask]
+                return df.to_dict(orient='records')
+            except Exception as e:
+                print(f"Error reading Laps Parquet for event {event_id}: {e}")
+
+        # 3. Fallback to SQLite
+        with get_db_connection(season) as conn:
+            cursor = conn.cursor()
+            # ... (resto do fallback igual)
 
             if driver_filter:
                 cursor.execute("""
@@ -236,7 +276,39 @@ class DataRepository:
     def get_telemetry_for_lap(
         season: int, lap_id: int
     ) -> List[Dict[str, Any]]:
-        """Get telemetry samples for a specific lap."""
+        """
+        Get telemetry samples for a specific lap.
+        Tries to read FROM THE EVENT PARQUET first.
+        """
+        # 1. Resolver qual o event_id desse lap_id
+        with get_db_connection(season) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT s.event_id FROM laps l
+                JOIN sessions s ON l.session_id = s.id
+                WHERE l.id = ?
+            """, (lap_id,))
+            row = cursor.fetchone()
+            if not row: return []
+            event_id = row['event_id']
+
+        # 2. Tentar ler do Parquet do EVENTO
+        parquet_path = os.path.join(
+            DataRepository.TELEMETRY_DATA_DIR,
+            str(season),
+            f"event_{event_id}.parquet"
+        )
+
+        if os.path.exists(parquet_path):
+            try:
+                df = pd.read_parquet(parquet_path)
+                if 'lap_id' in df.columns:
+                    df_lap = df[df['lap_id'] == lap_id]
+                    return df_lap.to_dict(orient='records')
+            except Exception as e:
+                print(f"Error reading Event Parquet for lap {lap_id}: {e}")
+
+        # 3. Fallback to SQLite
         with get_db_connection(season) as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -270,7 +342,33 @@ class DataRepository:
     def get_results_for_session(
         season: int, session_id: int
     ) -> List[Dict[str, Any]]:
-        """Get results/standings for a session."""
+        """
+        Get results for a session.
+        Tries Event-based Parquet first.
+        """
+        # 1. Get event_id
+        with get_db_connection(season) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT event_id FROM sessions WHERE id = ?", (session_id,))
+            row = cursor.fetchone()
+            if not row: return []
+            event_id = row['event_id']
+
+        # 2. Try Event Parquet
+        parquet_path = os.path.join(
+            DataRepository.RESULTS_DATA_DIR,
+            str(season),
+            f"event_{event_id}.parquet"
+        )
+        if os.path.exists(parquet_path):
+            try:
+                df = pd.read_parquet(parquet_path)
+                df = df[df['session_id'] == session_id]
+                return df.to_dict(orient='records')
+            except Exception as e:
+                print(f"Error reading Results Parquet for event {event_id}: {e}")
+
+        # 3. Fallback to SQLite
         with get_db_connection(season) as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -287,7 +385,33 @@ class DataRepository:
     def get_weather_for_session(
         season: int, session_id: int
     ) -> List[Dict[str, Any]]:
-        """Get weather data points for a session."""
+        """
+        Get weather for a session.
+        Tries Event-based Parquet first.
+        """
+        # 1. Get event_id
+        with get_db_connection(season) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT event_id FROM sessions WHERE id = ?", (session_id,))
+            row = cursor.fetchone()
+            if not row: return []
+            event_id = row['event_id']
+
+        # 2. Try Event Parquet
+        parquet_path = os.path.join(
+            DataRepository.WEATHER_DATA_DIR,
+            str(season),
+            f"event_{event_id}.parquet"
+        )
+        if os.path.exists(parquet_path):
+            try:
+                df = pd.read_parquet(parquet_path)
+                df = df[df['session_id'] == session_id]
+                return df.to_dict(orient='records')
+            except Exception as e:
+                print(f"Error reading Weather Parquet for event {event_id}: {e}")
+
+        # 3. Fallback to SQLite
         with get_db_connection(season) as conn:
             cursor = conn.cursor()
             cursor.execute("""

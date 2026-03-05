@@ -338,7 +338,7 @@ def update_content(results_json, chart_type, season):
     if chart_type == "progression":
         return None, HIDE, SHOW
 
-    fig_drivers, fig_teams, _ = _compute_figs(results_json, season)
+    fig_drivers, fig_teams, kpis = _compute_figs(results_json, season)
 
     if chart_type == "drivers":
         return dcc.Graph(figure=(fig_drivers or empty_fig), config={"staticPlot": True}), SHOW, HIDE

@@ -57,10 +57,15 @@ class TelemetryService:
             if not raw:
                 raise ValueError(f"Telemetria não encontrada para {drv}")
 
-            df = pd.DataFrame(raw)
-            # Calcular distância acumulada a partir de velocidade × tempo
-            dt = df['session_time_seconds'].diff().fillna(0)
-            df['Distance'] = (df['speed'] / 3.6 * dt).cumsum()
+            # Se tivermos 'distance' (vindo do Parquet), use ela.
+            # Caso contrário, calcule a partir de velocidade/tempo (fallback SQL).
+            if 'distance' in df.columns:
+                df['Distance'] = df['distance']
+            else:
+                # Fallback calculation (m/s * dt)
+                dt = df['session_time_seconds'].diff().fillna(0)
+                df['Distance'] = (df['speed'] / 3.6 * dt).cumsum()
+
             df = df.rename(columns=rename_map)
 
             laps_data[drv] = best_lap
@@ -88,7 +93,7 @@ class TelemetryService:
                 'session': session['name'],
                 'drivers': drivers,
                 'lap_times': {
-                    drv: f"{laps_data[drv]['lap_time_seconds']:.3f}s"
+                    drv: laps_data[drv]['lap_time_seconds']
                     for drv in drivers
                 },
             },

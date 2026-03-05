@@ -17,7 +17,7 @@ load_dotenv(basedir / ".env")
 
 # ── Configurações lidas do .env ────────────────────────────────────────────────
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "")
-GCS_DB_BLOB_PATH = os.getenv("GCS_DB_BLOB_PATH", "db/pitwall_cache.db")
+GCS_DB_BLOB_PATH = os.getenv("GCS_DB_BLOB_PATH", "pitwall_cache.db")
 DB_DIR = os.getenv("DB_DIR", "data")
 DB_NAME = os.getenv("DB_NAME", "pitwall_cache.db")
 GOOGLE_APPLICATION_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
@@ -73,7 +73,44 @@ def upload_db(season: int | None = None) -> None:
 
     print(f"⬆️  Enviando {local_path} → gs://{GCS_BUCKET_NAME}/{target_blob}")
     blob.upload_from_filename(str(local_path))
-    print(f"✅ Upload concluído ({local_path.stat().st_size / 1024 / 1024:.1f} MB)")
+    print(f"✅ Upload do banco concluído ({local_path.stat().st_size / 1024 / 1024:.1f} MB)")
+
+    # 3. Upload de Telemetria e Dados Otimizados (Parquet)
+    upload_optimized_data(season)
+
+
+def upload_optimized_data(season: int | None = None) -> None:
+    """
+    Sincroniza todas as pastas de dados otimizados (telemetry, laps, weather, results)
+    com o GCS para a temporada especificada.
+    """
+    if not season:
+        print("ℹ️  Especifique a temporada para upload de dados otimizados.")
+        return
+
+    client = _get_client()
+    bucket = client.bucket(GCS_BUCKET_NAME)
+    
+    data_types = ["telemetry", "laps", "weather", "results"]
+    total_count = 0
+
+    for dtype in data_types:
+        local_dir = basedir / "data" / dtype / str(season)
+        if not local_dir.exists():
+            continue
+            
+        print(f"⬆️  Sincronizando {dtype} {season}...")
+        count = 0
+        for p_file in local_dir.glob("*.parquet"):
+            blob_name = f"{dtype}/{season}/{p_file.name}"
+            blob = bucket.blob(blob_name)
+            blob.upload_from_filename(str(p_file))
+            count += 1
+        
+        print(f"   - {count} arquivos de {dtype} enviados.")
+        total_count += count
+
+    print(f"✅ Sincronização de {total_count} arquivos Parquet concluída.")
 
 
 def download_db(season: int | None = None) -> None:

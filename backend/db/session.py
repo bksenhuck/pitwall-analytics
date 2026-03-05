@@ -160,6 +160,7 @@ def init_database(season: int):
                 position REAL,
                 deleted BOOLEAN DEFAULT 0,
                 deleted_reason TEXT,
+                has_telemetry BOOLEAN DEFAULT 0,
 
                 FOREIGN KEY (session_id) REFERENCES sessions(id),
                 UNIQUE(session_id, driver_number, lap_number)

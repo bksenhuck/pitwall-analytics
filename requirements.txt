@@ -5,6 +5,7 @@
 # Backend API Framework (FastAPI)
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0        # ASGI server for FastAPI
+gunicorn>=21.0.0                  # Production WSGI/ASGI server
 pydantic>=2.0.0                   # Data validation (included with FastAPI)
 python-multipart>=0.0.6           # For form data/file uploads
 
@@ -17,6 +18,8 @@ httpx>=0.25.0                     # Async HTTP client (replaces requests in asyn
 # Data Processing
 pandas>=2.0.0
 numpy>=1.24.0
+pyarrow>=12.0.0  # Required for Parquet support in Pandas
+fastparquet>=2023.4.0 # Optional but good for alternative parquet engine
 
 # F1 Data
 fastf1>=3.0.0

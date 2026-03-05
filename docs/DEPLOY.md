@@ -139,23 +139,136 @@ heroku open
 
 ## ☁️ Google Cloud Run
 
-```bash
-# Build Docker image
-docker build -t pitwall-analytics .
+### Arquitetura GCP
 
-# Tag
-docker tag pitwall-analytics gcr.io/SEU-PROJECT/pitwall-analytics
-
-# Push
-docker push gcr.io/SEU-PROJECT/pitwall-analytics
-
-# Deploy
-gcloud run deploy pitwall-analytics \
-  --image gcr.io/SEU-PROJECT/pitwall-analytics \
-  --platform managed \
-  --region us-central1 \
-  --allow-unauthenticated
 ```
+GitHub push (main)
+    |
+    v
+GitHub Actions
+    |-- docker build + push --> Artifact Registry
+    |
+    v
+Cloud Run (pitwall-analytics)
+    |-- download DB --> Google Cloud Storage (GCS)
+    |-- serve app   --> usuários
+```
+
+### Pré-requisitos
+
+1. **gcloud CLI instalado e autenticado:**
+   ```bash
+   gcloud auth login
+   gcloud config set project SEU-PROJETO
+   ```
+
+2. **Artifact Registry criado:**
+   ```bash
+   gcloud artifacts repositories create pitwall-repo \
+     --repository-format=docker \
+     --location=us-central1
+   ```
+
+3. **Bucket GCS criado:**
+   ```bash
+   gsutil mb -l us-central1 gs://pitwall-analytics-data
+   ```
+
+4. **Service Account com permissões:**
+   ```bash
+   gcloud iam service-accounts create pitwall-sa \
+     --display-name="Pitwall Analytics SA"
+
+   # Storage object viewer (para Cloud Run ler o DB)
+   gcloud projects add-iam-policy-binding SEU-PROJETO \
+     --member="serviceAccount:pitwall-sa@SEU-PROJETO.iam.gserviceaccount.com" \
+     --role="roles/storage.objectViewer"
+
+   # Storage object creator (para upload do DB via pipeline)
+   gcloud projects add-iam-policy-binding SEU-PROJETO \
+     --member="serviceAccount:pitwall-sa@SEU-PROJETO.iam.gserviceaccount.com" \
+     --role="roles/storage.objectCreator"
+   ```
+
+### Configurar .env
+
+Preencha as variaveis GCP no `.env`:
+```env
+GCS_BUCKET_NAME=pitwall-analytics-data
+GCS_DB_BLOB_PATH=db/pitwall_cache.db
+GCP_PROJECT=meu-projeto-gcp
+GCP_REGION=us-central1
+AR_REPOSITORY=pitwall-repo
+CLOUDRUN_SERVICE=pitwall-analytics
+IMAGE_NAME=pitwall-analytics
+```
+
+### Subir dados para o GCS
+
+```bash
+# Upload do banco SQLite para o GCS
+python -m backend.pipelines.deploy.upload_to_gcs
+
+# Upload de uma temporada especifica
+python -m backend.pipelines.deploy.upload_to_gcs --season 2025
+
+# Upload + acionar redeploy
+python -m backend.pipelines.deploy.upload_to_gcs --deploy
+```
+
+Ou via script antigo (mais simples):
+```bash
+python -m backend.services.gcs_service upload
+python -m backend.services.gcs_service upload --season 2025
+```
+
+### Build e Deploy manual
+
+```bash
+# Build Docker + deploy no Cloud Run
+python -m backend.pipelines.deploy.build_and_deploy
+
+# Apenas build
+python -m backend.pipelines.deploy.build_and_deploy --build-only
+
+# Apenas redeploy (imagem ja existente)
+python -m backend.pipelines.deploy.build_and_deploy --deploy-only
+
+# Com tag especifica
+python -m backend.pipelines.deploy.build_and_deploy --tag v1.2.0
+```
+
+### Deploy via GitHub Actions (CI/CD)
+
+O workflow `.github/workflows/deploy.yml` faz build + deploy automaticamente no push para `main`.
+
+**Secrets necessarios no GitHub** (Settings → Secrets → Actions):
+
+| Secret | Valor |
+|--------|-------|
+| `GCP_SA_KEY` | JSON da service account (para autenticar) |
+| `GCP_PROJECT` | ID do projeto GCP |
+| `GCP_REGION` | Regiao (ex: `us-central1`) |
+| `AR_REPOSITORY` | Nome do repositorio Artifact Registry |
+| `CLOUDRUN_SERVICE` | Nome do servico Cloud Run |
+| `GCS_BUCKET_NAME` | Nome do bucket GCS |
+| `GCS_DB_BLOB_PATH` | Caminho do DB no bucket |
+
+**Gerar chave da service account:**
+```bash
+gcloud iam service-accounts keys create sa-key.json \
+  --iam-account=pitwall-sa@SEU-PROJETO.iam.gserviceaccount.com
+# Copie o conteudo de sa-key.json para o secret GCP_SA_KEY
+```
+
+### Download do DB no startup (producao)
+
+O app pode baixar o DB do GCS automaticamente ao iniciar:
+```bash
+python -m backend.services.gcs_service download
+```
+
+Para integrar no startup do Cloud Run, adicione ao entrypoint ou ao evento `startup` do FastAPI em `main.py`.
 
 ---
 

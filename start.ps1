@@ -5,10 +5,10 @@ Write-Host "[PITWALL] Inicializando sistema..." -ForegroundColor Cyan
 Write-Host ""
 
 # Verificar se esta no diretorio correto
-$projectPath = "C:\Users\ksenh\Documents\projects\pitwall-analytics\pitwall-analytics"
-if (-not (Test-Path $projectPath)) {
+$projectPath = Get-Location
+if (-not (Test-Path "main.py")) {
     Write-Host "[ERRO] Diretorio do projeto nao encontrado!" -ForegroundColor Red
-    Write-Host "Esperado: $projectPath" -ForegroundColor Yellow
+    Write-Host "Certifique-se de executar no diretorio raiz da aplicacao." -ForegroundColor Yellow
     pause
     exit 1
 }
@@ -16,15 +16,16 @@ if (-not (Test-Path $projectPath)) {
 Set-Location $projectPath
 
 # Verificar se o ambiente virtual existe
-$venvPath = "..\venv_pitwall_analytics\Scripts\Activate.ps1"
+$venvPath = ".\venv_pitwall_analytics\Scripts\Activate.ps1"
 if (-not (Test-Path $venvPath)) {
-    Write-Host "[ERRO] Ambiente virtual nao encontrado!" -ForegroundColor Red
-    Write-Host "Esperado: $venvPath" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "Crie o ambiente virtual primeiro:" -ForegroundColor Yellow
-    Write-Host "python -m venv venv_pitwall_analytics" -ForegroundColor White
-    pause
-    exit 1
+    # Tenta tambem no diretorio atual por conveniencia
+    $venvPath = ".\venv\Scripts\Activate.ps1"
+    if (-not (Test-Path $venvPath)) {
+        Write-Host "[ERRO] Ambiente virtual nao encontrado!" -ForegroundColor Red
+        Write-Host "Crie o ambiente virtual primeiro (ex: python -m venv venv)" -ForegroundColor Yellow
+        pause
+        exit 1
+    }
 }
 
 # Ativar ambiente virtual
@@ -49,7 +50,7 @@ Write-Host "[START] Iniciando Backend (FastAPI)..." -ForegroundColor Green
 Start-Process powershell -ArgumentList @(
     "-NoExit",
     "-Command",
-    "cd '$projectPath'; & '$projectPath\..\venv_pitwall_analytics\Scripts\Activate.ps1'; Write-Host '[BACKEND] FastAPI rodando...' -ForegroundColor Green; Write-Host 'API: http://127.0.0.1:5000' -ForegroundColor Cyan; Write-Host 'Docs: http://127.0.0.1:5000/docs' -ForegroundColor Cyan; Write-Host ''; python -m backend.app"
+    "cd '$projectPath'; & '$projectPath\.\venv_pitwall_analytics\Scripts\Activate.ps1'; Write-Host '[BACKEND] FastAPI rodando...' -ForegroundColor Green; Write-Host 'API: http://127.0.0.1:5000' -ForegroundColor Cyan; Write-Host 'Docs: http://127.0.0.1:5000/docs' -ForegroundColor Cyan; Write-Host ''; python -m backend.app"
 )
 
 # Aguardar 3 segundos antes de iniciar o frontend
@@ -60,7 +61,7 @@ Write-Host "[START] Iniciando Frontend (Dash)..." -ForegroundColor Green
 Start-Process powershell -ArgumentList @(
     "-NoExit",
     "-Command",
-    "cd '$projectPath'; & '$projectPath\..\venv_pitwall_analytics\Scripts\Activate.ps1'; Write-Host '[FRONTEND] Dash rodando...' -ForegroundColor Green; Write-Host 'Interface: http://127.0.0.1:8050' -ForegroundColor Cyan; Write-Host ''; python app.py"
+    "cd '$projectPath'; & '$projectPath\.\venv_pitwall_analytics\Scripts\Activate.ps1'; Write-Host '[FRONTEND] Dash rodando...' -ForegroundColor Green; Write-Host 'Interface: http://127.0.0.1:8050' -ForegroundColor Cyan; Write-Host ''; python app.py"
 )
 
 Write-Host ""

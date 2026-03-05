@@ -5,8 +5,8 @@ Write-Host "[PRODUCTION TEST] Iniciando modo de producao..." -ForegroundColor Cy
 Write-Host ""
 
 # Verificar se esta no diretorio correto
-$projectPath = "C:\Users\ksenh\Documents\projects\pitwall-analytics\pitwall-analytics"
-if (-not (Test-Path $projectPath)) {
+$projectPath = Get-Location
+if (-not (Test-Path "main.py")) {
     Write-Host "[ERRO] Diretorio do projeto nao encontrado!" -ForegroundColor Red
     exit 1
 }
@@ -14,9 +14,12 @@ if (-not (Test-Path $projectPath)) {
 Set-Location $projectPath
 
 # Ativar ambiente virtual
-$venvPath = "..\venv_pitwall_analytics\Scripts\Activate.ps1"
-if (Test-Path $venvPath) {
-    & $venvPath
+$venvPaths = @(".\venv_pitwall_analytics\Scripts\Activate.ps1", ".\venv\Scripts\Activate.ps1")
+foreach ($venvPath in $venvPaths) {
+    if (Test-Path $venvPath) {
+        & $venvPath
+        break
+    }
 }
 
 Write-Host "[INFO] Modo: PRODUCAO (servidor unificado)" -ForegroundColor Yellow

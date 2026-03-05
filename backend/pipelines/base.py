@@ -7,6 +7,7 @@ object it needs and writes directly to the per-season DB.
 """
 import logging
 from typing import Dict, Optional, Tuple
+from pathlib import Path
 
 import pandas as pd
 
@@ -202,8 +203,9 @@ class BasePipeline:
                             speed_i1, speed_i2, speed_fl, speed_st,
                             is_personal_best, is_accurate,
                             compound, tyre_life, fresh_tyre, stint,
-                            track_status, position, deleted, deleted_reason
-                        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                            track_status, position, deleted, deleted_reason,
+                            has_telemetry
+                        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                         """,
                         (
                             session_id,
@@ -241,6 +243,7 @@ class BasePipeline:
                             str(lap["DeletedReason"])
                             if pd.notna(lap.get("DeletedReason"))
                             else None,
+                            0,  # has_telemetry
                         ),
                     )
                     count += 1
@@ -248,13 +251,38 @@ class BasePipeline:
                     logger.debug("Lap insert error: %s", exc)
                     continue
 
-            conn.commit()
+            # --- NOVO: Agrupar por EVENTO no Parquet (Um arquivo por Prova) ---
+            try:
+                laps_dir = Path("data") / "laps" / str(season)
+                laps_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Para manter a lógica por Prova, pegamos o event_id
+                with get_db_connection(season) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT event_id FROM sessions WHERE id = ?", (session_id,))
+                    event_id = cursor.fetchone()['event_id']
+
+                # Lemos os laps do SQLite para garantir que temos todos do evento até agora
+                # (ou anexamos ao existente). Para simplicidade e consistência, regeramos do evento:
+                with get_db_connection(season) as conn:
+                    df_event_laps = pd.read_sql_query("""
+                        SELECT l.* FROM laps l
+                        JOIN sessions s ON l.session_id = s.id
+                        WHERE s.event_id = ?
+                    """, conn, params=(event_id,))
+                    
+                    parquet_path = laps_dir / f"event_{event_id}.parquet"
+                    df_event_laps.to_parquet(parquet_path, compression='snappy', index=False)
+                logger.info("Laps for Event %s exported to Parquet", event_id)
+            except Exception as e:
+                logger.error("Error exporting laps to Parquet: %s", e)
+
             return count
 
     def _insert_telemetry(self, season: int, session_id: int, session) -> int:
         """
-        Insert telemetry (speed, RPM, gear, X/Y/Z…) for all laps.
-        Returns total telemetry rows inserted.
+        Save telemetry (speed, RPM, gear, X/Y/Z…) for all laps into Parquet.
+        Returns total laps with telemetry saved.
         """
         if (
             not hasattr(session, "laps")
@@ -275,8 +303,12 @@ class BasePipeline:
                 for row in cursor.fetchall()
             }
 
-        total = 0
+        telemetry_dir = Path("data") / "telemetry" / str(season)
+        telemetry_dir.mkdir(parents=True, exist_ok=True)
 
+        # 1. Coletar TODA a telemetria da sessão primeiro
+        all_telemetry_data = []
+        
         for driver_number in session.laps["DriverNumber"].unique():
             driver_laps = session.laps.pick_drivers(str(driver_number))
 
@@ -290,56 +322,82 @@ class BasePipeline:
                     tel = lap.get_telemetry()
                     if tel is None or tel.empty:
                         continue
-
-                    rows = []
-                    for _, t in tel.iterrows():
-                        st = t.get("SessionTime")
-                        rows.append((
-                            lap_id,
-                            st.total_seconds() if pd.notna(st) else None,
-                            float(t["Speed"]) if pd.notna(t.get("Speed")) else None,
-                            int(t["RPM"]) if pd.notna(t.get("RPM")) else None,
-                            int(t["nGear"]) if pd.notna(t.get("nGear")) else None,
-                            float(t["Throttle"]) if pd.notna(t.get("Throttle")) else None,
-                            bool(t["Brake"]) if pd.notna(t.get("Brake")) else None,
-                            int(t["DRS"]) if pd.notna(t.get("DRS")) else None,
-                            float(t["X"]) if pd.notna(t.get("X")) else None,
-                            float(t["Y"]) if pd.notna(t.get("Y")) else None,
-                            float(t["Z"]) if pd.notna(t.get("Z")) else None,
-                            str(t["Source"]) if pd.notna(t.get("Source")) else None,
-                        ))
-
-                    if not rows:
-                        continue
-
+                    
+                    # Adicionar lap_id para poder filtrar depois
+                    tel['lap_id'] = lap_id
+                    all_telemetry_data.append(tel)
+                    
+                    # Marcar como processada no SQL
                     with get_db_connection(season) as conn:
                         cursor = conn.cursor()
-                        cursor.execute(
-                            "DELETE FROM telemetry WHERE lap_id = ?", (lap_id,)
-                        )
-                        cursor.executemany(
-                            """
-                            INSERT INTO telemetry (
-                                lap_id, session_time_seconds,
-                                speed, rpm, gear, throttle,
-                                brake, drs, x, y, z, source
-                            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-                            """,
-                            rows,
-                        )
+                        cursor.execute("UPDATE laps SET has_telemetry = 1 WHERE id = ?", (lap_id,))
                         conn.commit()
-                        total += len(rows)
 
                 except Exception as exc:
-                    logger.debug(
-                        "Telemetry error driver %s lap %d: %s",
-                        driver_number,
-                        lap_number,
-                        exc,
-                    )
+                    logger.debug("Telemetry gathering error: %s", exc)
                     continue
 
-        return total
+        if not all_telemetry_data:
+            return 0
+
+        # 2. Unificar em um único DataFrame e salvar em UM ÚNICO POR EVENTO (Prova)
+        combined_df = pd.concat(all_telemetry_data, ignore_index=True)
+        
+        # Otimizar tipos
+        opt_df = pd.DataFrame()
+        opt_df['lap_id'] = combined_df['lap_id'].astype('int32')
+        opt_df['session_time_seconds'] = combined_df['SessionTime'].dt.total_seconds().astype('float32')
+        opt_df['speed'] = combined_df['Speed'].astype('float32')
+        opt_df['rpm'] = combined_df['RPM'].astype('int32')
+        opt_df['gear'] = combined_df['nGear'].astype('int8')
+        opt_df['throttle'] = combined_df['Throttle'].astype('float32')
+        opt_df['brake'] = combined_df['Brake'].astype('bool')
+        opt_df['drs'] = combined_df['DRS'].astype('int8')
+        opt_df['x'] = combined_df['X'].astype('float32')
+        opt_df['y'] = combined_df['Y'].astype('float32')
+        opt_df['z'] = combined_df['Z'].astype('float32')
+        opt_df['source'] = combined_df['Source'].astype('string')
+
+        # Buscar event_id
+        with get_db_connection(season) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT event_id FROM sessions WHERE id = ?", (session_id,))
+            event_id = cursor.fetchone()['event_id']
+
+        # Se já existir arquivo do evento (ex: FP1 já rodou e estamos no FP2), 
+        # anexamos os dados das sessões anteriores para ter a PROVA COMPLETA.
+        parquet_path = telemetry_dir / f"event_{event_id}.parquet"
+        if parquet_path.exists():
+            try:
+                existing_df = pd.read_parquet(parquet_path)
+                # Removendo lap_ids desta sessão se por acaso estivermos re-processando
+                existing_df = existing_df[~existing_df['lap_id'].isin(opt_df['lap_id'])]
+                opt_df = pd.concat([existing_df, opt_df], ignore_index=True)
+            except Exception as e:
+                logger.warning("Could not append to existing event Parquet: %s", e)
+
+        opt_df.to_parquet(parquet_path, compression='snappy', index=False)
+
+        # 3. Salvar no SQLite (Redundância opcional mas mantida conforme pedido)
+        # Nota: Como o DF é grande, o SQLite pode demorar, mas manteremos pela redundância solicitada.
+        with get_db_connection(season) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                DELETE FROM telemetry WHERE lap_id IN (
+                    SELECT id FROM laps WHERE session_id = ?
+                )
+            """, (session_id,))
+            
+            rows = opt_df.values.tolist()
+            cursor.executemany("""
+                INSERT INTO telemetry (
+                    lap_id, session_time_seconds, speed, rpm, gear,
+                    throttle, brake, drs, x, y, z, source
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, rows)
+            conn.commit()
+
+        return len(all_telemetry_data)
 
     def _insert_results(self, season: int, session_id: int, session) -> int:
         """Insert race/session results. Returns count inserted."""
@@ -404,7 +462,29 @@ class BasePipeline:
                     logger.debug("Result insert error: %s", exc)
                     continue
 
-            conn.commit()
+            # --- NOVO: Exportar Results por EVENTO (Prova) ---
+            try:
+                results_dir = Path("data") / "results" / str(season)
+                results_dir.mkdir(parents=True, exist_ok=True)
+                
+                with get_db_connection(season) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT event_id FROM sessions WHERE id = ?", (session_id,))
+                    event_id = cursor.fetchone()['event_id']
+                    
+                    # Consolidar todos os resultados do evento
+                    df_event_results = pd.read_sql_query("""
+                        SELECT r.* FROM results r
+                        JOIN sessions s ON r.session_id = s.id
+                        WHERE s.event_id = ?
+                    """, conn, params=(event_id,))
+                    
+                    parquet_path = results_dir / f"event_{event_id}.parquet"
+                    df_event_results.to_parquet(parquet_path, compression='snappy', index=False)
+                logger.info("Results for Event %s exported to Parquet", event_id)
+            except Exception as e:
+                logger.error("Error exporting results to Parquet: %s", e)
+
             return count
 
     def _insert_weather(self, season: int, session_id: int, session) -> int:
@@ -463,7 +543,29 @@ class BasePipeline:
                 except Exception:
                     continue
 
-            conn.commit()
+            # --- NOVO: Exportar Weather por EVENTO (Prova) ---
+            try:
+                weather_dir = Path("data") / "weather" / str(season)
+                weather_dir.mkdir(parents=True, exist_ok=True)
+                
+                with get_db_connection(season) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT event_id FROM sessions WHERE id = ?", (session_id,))
+                    event_id = cursor.fetchone()['event_id']
+
+                    # Consolidar clima do evento
+                    df_event_weather = pd.read_sql_query("""
+                        SELECT w.* FROM weather w
+                        JOIN sessions s ON w.session_id = s.id
+                        WHERE s.event_id = ?
+                    """, conn, params=(event_id,))
+                    
+                    parquet_path = weather_dir / f"event_{event_id}.parquet"
+                    df_event_weather.to_parquet(parquet_path, compression='snappy', index=False)
+                logger.info("Weather for Event %s exported to Parquet", event_id)
+            except Exception as e:
+                logger.error("Error exporting weather to Parquet: %s", e)
+
             return count
 
     def _insert_race_control_messages(

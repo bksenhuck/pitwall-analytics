@@ -57,6 +57,8 @@ class TelemetryService:
             if not raw:
                 raise ValueError(f"Telemetria não encontrada para {drv}")
 
+            df = pd.DataFrame(raw)
+
             # Se tivermos 'distance' (vindo do Parquet), use ela.
             # Caso contrário, calcule a partir de velocidade/tempo (fallback SQL).
             if 'distance' in df.columns:

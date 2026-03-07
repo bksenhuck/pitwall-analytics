@@ -41,6 +41,8 @@ class TelemetryService:
             'throttle': 'Throttle',
             'gear': 'nGear',
             'drs': 'DRS',
+            'x': 'X',
+            'y': 'Y',
         }
 
         laps_data: Dict[str, dict] = {}
@@ -77,7 +79,7 @@ class TelemetryService:
         max_dist = min(df['Distance'].max() for df in tele_data.values())
         distance_points = np.linspace(0, max_dist, 1000)
 
-        cols = ['Speed', 'RPM', 'Throttle', 'nGear', 'DRS']
+        cols = ['Speed', 'RPM', 'Throttle', 'nGear', 'DRS', 'X', 'Y']
 
         def interpolate_driver(df: pd.DataFrame) -> Dict[str, list]:
             result = {'Distance': distance_points.tolist()}

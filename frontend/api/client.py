@@ -164,6 +164,22 @@ def get_races_for_season(season: int) -> List[str]:
         return []
 
 
+def get_sessions_for_event(season: int, event_name: str) -> list:
+    """Return list of available session types for a given season+event."""
+    if not _check_backend_available():
+        return []
+    try:
+        url = f"{BACKEND_API_URL}/data/available"
+        response = requests.get(url, timeout=2)
+        response.raise_for_status()
+        data = response.json()
+        season_data = data.get(str(season), {})
+        event_data = season_data.get(event_name, {})
+        return event_data.get("sessions", [])
+    except Exception:
+        return []
+
+
 def get_race_results(season: int, event_name: str) -> pd.DataFrame:
     """
     Load race results (position, points, team) for one event.

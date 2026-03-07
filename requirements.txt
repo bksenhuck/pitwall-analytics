@@ -43,3 +43,4 @@ google-cloud-storage>=2.10.0
 # black>=23.0.0
 # flake8>=6.0.0
 # httpx-mock>=0.10.0              # For mocking async HTTP calls
+gcsfs>=2023.1.0

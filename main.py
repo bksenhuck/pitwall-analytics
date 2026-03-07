@@ -43,20 +43,16 @@ def create_production_app() -> FastAPI:
 
     from backend.api.health import router as health_router
     from backend.api.data import router as data_router
-    from backend.routes.data import router as cached_data_router
 
     app.include_router(health_router, prefix="/api", tags=["Health"])
     app.include_router(data_router, prefix="/api", tags=["Data"])
-    app.include_router(cached_data_router, prefix="/api/cached", tags=["Cached Data"])
 
     # ------------------------------------------------------------------
-    # 2. Startup: inicializar cache FastF1 + baixar DBs do GCS
+    # 2. Startup: baixar DBs do GCS
     # ------------------------------------------------------------------
     @app.on_event("startup")
     async def startup_event():
-        from backend.services.cache_service import init_cache
-        init_cache(config.CACHE_DIR, config.CACHE_ENABLED)
-        print("FastF1 cache inicializado")
+        if config.GCS_BUCKET_NAME:
 
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, _download_dbs_from_gcs)
@@ -105,39 +101,13 @@ def _download_dbs_from_gcs():
         )
         bucket = client.bucket(bucket_name)
 
-        # 1. Download de Bancos SQLite
-        all_blobs = {
-            b.name: b
-            for b in bucket.list_blobs()
-            if b.name.startswith("pitwall_") and b.name.endswith(".db")
-        }
+        # 1. Download de Bancos SQLite (DESATIVADO - Uso apenas offline)
+        # Os bancos .db não são mais usados pela aplicação em produção.
+        print("[GCS] Ignorando bancos SQLite (.db) conforme configuração")
 
-        if not all_blobs:
-            print(f"[GCS] Nenhum banco pitwall_*.db no bucket {bucket_name}")
-        else:
-            seasons_env = os.getenv("GCS_SEASONS", "")
-            if seasons_env:
-                target_blobs = [
-                    all_blobs[f"pitwall_{s.strip()}.db"]
-                    for s in seasons_env.replace(",", ":").split(":")
-                    if f"pitwall_{s.strip()}.db" in all_blobs
-                ]
-            else:
-                latest = sorted(all_blobs.keys())[-1]
-                target_blobs = [all_blobs[latest]]
-                print(f"[GCS] GCS_SEASONS nao definido — baixando apenas {latest}")
-
-            for blob in target_blobs:
-                dest = db_dir / blob.name
-                if dest.exists():
-                    print(f"[GCS] {blob.name} ja existe localmente — pulando")
-                    continue
-                print(f"[GCS] Baixando {blob.name} -> {dest}")
-                blob.download_to_filename(str(dest))
-
-        # 2. Download de Dados Otimizados (Parquet em telemetry/, laps/, weather/, results/)
+        # 2. Download de Dados Otimizados (Parquet em metadata/, telemetry/, laps/, weather/, results/)
         print("[GCS] Baixando arquivos de performance otimizados...")
-        data_prefixes = ["telemetry/", "laps/", "weather/", "results/"]
+        data_prefixes = ["metadata/", "laps/", "weather/", "results/"]  # telemetry lido sob demanda do GCS
         total_count = 0
         
         for prefix in data_prefixes:
@@ -163,6 +133,25 @@ def _download_dbs_from_gcs():
         
         if total_count > 0:
             print(f"[GCS] {total_count} arquivos otimizados sincronizados.")
+
+        # 3. Download de Imagens (images/{subdir}/...)
+        print("[GCS] Baixando imagens...")
+        img_count = 0
+        for blob in bucket.list_blobs(prefix="images/"):
+            # Ignorar a pasta duplicada images/images/ criada por upload incorreto
+            if blob.name.startswith("images/images/"):
+                continue
+            if not any(blob.name.endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".svg", ".webp")):
+                continue
+            # Formato: images/{subdir}/... -> assets/static/images/{subdir}/...
+            relative = blob.name[len("images/"):]  # remove "images/" prefix
+            dest = root_dir / "assets" / "static" / "images" / relative
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if not dest.exists():
+                blob.download_to_filename(str(dest))
+                img_count += 1
+        if img_count > 0:
+            print(f"[GCS] {img_count} imagens sincronizadas.")
 
     except Exception as e:
         print(f"[GCS] Erro ao sincronizar dados: {e}")

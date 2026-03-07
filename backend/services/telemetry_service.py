@@ -53,9 +53,13 @@ class TelemetryService:
                 raise ValueError(f"Nenhuma volta válida encontrada para {drv}")
 
             best_lap = min(valid_laps, key=lambda x: x['lap_time_seconds'])
-            raw = self.repo.get_telemetry_for_lap(year, best_lap['id'])
-            if not raw:
+            df = self.repo.get_telemetry_for_lap(year, best_lap['id'], session_id=best_lap.get('session_id'))
+            if df is None:
                 raise ValueError(f"Telemetria não encontrada para {drv}")
+
+            df = pd.DataFrame(df)
+            if df.empty:
+                raise ValueError(f"Telemetria vazia para {drv}")
 
             # Se tivermos 'distance' (vindo do Parquet), use ela.
             # Caso contrário, calcule a partir de velocidade/tempo (fallback SQL).
@@ -71,20 +75,53 @@ class TelemetryService:
             laps_data[drv] = best_lap
             tele_data[drv] = df
 
-        # 3. Eixo de distância comum (mínimo entre todos os pilotos)
-        max_dist = min(df['Distance'].max() for df in tele_data.values())
-        distance_points = np.linspace(0, max_dist, 1000)
-
-        cols = ['Speed', 'RPM', 'Throttle', 'nGear', 'DRS']
+        # 3. Alinhamento e calculo de Delta (gap)
+        # Usamos o primeiro piloto como referencia para o Delta
+        ref_drv = drivers[0]
+        ref_tele = tele_data[ref_drv]
+        
+        # Eixo de distância comum: usamos a distância da volta de referência
+        # (geralmente a melhor volta do primeiro piloto selecionado)
+        distance_points = np.linspace(0, ref_tele['Distance'].max(), 1000)
 
         def interpolate_driver(df: pd.DataFrame) -> Dict[str, list]:
-            result = {'Distance': distance_points.tolist()}
-            for col in cols:
+            result = {}
+            # Speed, RPM, etc.
+            cols_to_interp = ['Speed', 'RPM', 'Throttle', 'nGear', 'DRS', 'x', 'y', 'z']
+            for col in cols_to_interp:
                 if col in df.columns:
+                    # Garantir que interpolamos contra a distância prorpia do DF
                     result[col] = np.interp(distance_points, df['Distance'], df[col]).tolist()
                 else:
                     result[col] = [0] * len(distance_points)
+                    
+            # Calculo do Tempo Acumulado para o Delta
+            # time = distance / speed
+            # Evitar divisão por zero
+            speed_ms = np.maximum(df['Speed'] / 3.6, 0.1)
+            # Interpola o tempo acumulado na distância comum
+            # Primeiro calculamos o tempo acumulado no DF original
+            if 'session_time_seconds' in df.columns:
+                # Usamos o tempo da sessão relativo ao início da volta
+                lap_start_time = df['session_time_seconds'].iloc[0]
+                accum_time = df['session_time_seconds'] - lap_start_time
+                result['AccumTime'] = np.interp(distance_points, df['Distance'], accum_time).tolist()
+            else:
+                # Fallback se não tiver tempo de sessão: calcula por dist/speed
+                # (menos preciso que o tempo real do sensor)
+                # ... mas idealmente o repo sempre retorna session_time_seconds
+                result['AccumTime'] = [0] * len(distance_points)
+                
             return result
+
+        interpolated = {drv: interpolate_driver(df) for drv, df in tele_data.items()}
+        
+        # Calcular Delta (em relação ao primeiro piloto)
+        # Delta = Tempo(Piloto X) - Tempo(Referência)
+        ref_accum_time = np.array(interpolated[ref_drv]['AccumTime'])
+        for drv in drivers:
+            drv_accum_time = np.array(interpolated[drv]['AccumTime'])
+            interpolated[drv]['Delta'] = (drv_accum_time - ref_accum_time).tolist()
 
         return {
             'metadata': {
@@ -99,7 +136,7 @@ class TelemetryService:
             },
             'telemetry': {
                 'distance': distance_points.tolist(),
-                'drivers': {drv: interpolate_driver(df) for drv, df in tele_data.items()},
+                'drivers': interpolated,
             },
             'corners': [],
         }

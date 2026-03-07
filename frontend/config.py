@@ -3,7 +3,9 @@ import os
 from pathlib import Path
 
 # Backend API URL - read from environment or default to localhost
-BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://127.0.0.1:5000/api")
+# In Cloud Run, PORT env var is set (usually 8080); fall back to API_PORT, then 5000
+_server_port = int(os.getenv("PORT", os.getenv("API_PORT", "5000")))
+BACKEND_API_URL = os.getenv("BACKEND_API_URL", f"http://127.0.0.1:{_server_port}/api")
 
 # Dash settings
 HOST = os.getenv("DASH_HOST", "127.0.0.1")

@@ -35,16 +35,21 @@ def create_app():
         title=APP_TITLE
     )
 
+    # Favicon (browser tab icon)
+    app._favicon = "static/logo_icon.png"
+
     app.layout = html.Div([
         # ── Header (non-fixed) ──────────────────────────────────
         html.Header([
-            html.Span([
-                html.Span("Pitwall", className="brand"),
-                html.Span(
-                    " Analytics",
-                    style={"color": "#C8D0DC", "fontWeight": "400"},
+            dash.dcc.Link(
+                html.Img(
+                    src="/assets/static/logo_clean.png",
+                    style={"height": "32px", "display": "block"},
+                    alt="Pitwall Analytics",
                 ),
-            ], className="brand"),
+                href="/",
+                style={"lineHeight": "0"},
+            ),
             html.Nav([
                 dash.dcc.Link("Home", href="/", className="nav-link"),
                 dash.dcc.Link(

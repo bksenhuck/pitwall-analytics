@@ -47,17 +47,19 @@ def get_db_connection(season: int) -> Generator[sqlite3.Connection, None, None]:
 def get_available_season_dbs() -> List[int]:
     """
     Scan the data directory for existing season database files.
-
-    Returns:
-        List of season years (descending) for which a pitwall_{year}.db exists.
+    In environments without DB files (like production), it should return an empty list
+    so the repository can fall back to Parquet file discovery.
     """
     if not DB_DIR.exists():
         return []
+    
     seasons = []
-    for f in DB_DIR.glob("pitwall_*.db"):
+    # No SQLite files in production - it should fallback to Parquet scanning in DataRepository
+    for f in DB_DIR.glob("pitwall_{year}.db".format(year="*")):
         try:
-            year = int(f.stem.split("_")[1])
-            seasons.append(year)
+            year_str = f.stem.split("_")[1]
+            if year_str.isdigit():
+                seasons.append(int(year_str))
         except (IndexError, ValueError):
             pass
     return sorted(seasons, reverse=True)

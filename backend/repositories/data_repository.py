@@ -1,606 +1,398 @@
 """
-Data Repository - Per-Season Normalized SQLite Schema
+Data Repository - Parquet-only implementation.
 
-All methods take a `season` parameter to open the correct DB file.
-Season discovery is done by scanning the data/ directory for
-pitwall_{year}.db files.
+All data is read exclusively from Parquet files:
+  data/metadata/{season}/events.parquet    - event catalog
+  data/metadata/{season}/sessions.parquet  - session catalog
+  data/laps/{season}/event_{id}.parquet    - lap data
+  data/results/{season}/event_{id}.parquet - race results
+  data/telemetry/{season}/event_{id}.parquet - telemetry
+  data/weather/{season}/event_{id}.parquet   - weather
 """
-import os
 import pandas as pd
-from backend.db.session import get_db_connection, get_available_season_dbs
+from pathlib import Path
 from typing import Optional, List, Dict, Any
+
+DATA_DIR = Path("data")
 
 
 class DataRepository:
-    """Repository for F1 data using per-season normalized schema"""
 
-    # Local storage for optimized files
-    TELEMETRY_DATA_DIR = os.path.join("data", "telemetry")
-    LAPS_DATA_DIR      = os.path.join("data", "laps")
-    WEATHER_DATA_DIR   = os.path.join("data", "weather")
-    RESULTS_DATA_DIR   = os.path.join("data", "results")
+    # ------------------------------------------------------------------ paths
 
-    # ===== SEASON METHODS =====
+    @staticmethod
+    def _meta_events(season: int) -> Path:
+        return DATA_DIR / "metadata" / str(season) / "events.parquet"
+
+    @staticmethod
+    def _meta_sessions(season: int) -> Path:
+        return DATA_DIR / "metadata" / str(season) / "sessions.parquet"
+
+    @staticmethod
+    def _laps_path(season: int, event_id: int) -> Path:
+        return DATA_DIR / "laps" / str(season) / f"event_{event_id}.parquet"
+
+    @staticmethod
+    def _results_path(season: int, event_id: int) -> Path:
+        return DATA_DIR / "results" / str(season) / f"event_{event_id}.parquet"
+
+    @staticmethod
+    def _weather_path(season: int, event_id: int) -> Path:
+        return DATA_DIR / "weather" / str(season) / f"event_{event_id}.parquet"
+
+    @staticmethod
+    def _telemetry_path(season: int, event_id: int) -> Path:
+        return DATA_DIR / "telemetry" / str(season) / f"event_{event_id}.parquet"
+
+    # --------------------------------------------------------------- loaders
+
+    @staticmethod
+    def _load_events(season: int) -> pd.DataFrame:
+        p = DataRepository._meta_events(season)
+        if p.exists():
+            return pd.read_parquet(p)
+        return pd.DataFrame()
+
+    @staticmethod
+    def _load_sessions(season: int) -> pd.DataFrame:
+        p = DataRepository._meta_sessions(season)
+        if p.exists():
+            return pd.read_parquet(p)
+        return pd.DataFrame()
+
+    @staticmethod
+    def _event_id_for_session(season: int, session_id: int) -> Optional[int]:
+        df = DataRepository._load_sessions(season)
+        if df.empty:
+            return None
+        rows = df[df["id"] == session_id]
+        if rows.empty:
+            return None
+        return int(rows.iloc[0]["event_id"])
+
+    # ------------------------------------------------------------ seasons
 
     @staticmethod
     def get_all_seasons() -> List[int]:
-        """
-        Discover available seasons by scanning the data directory.
-
-        Returns:
-            List of season years (descending) with an existing DB file.
-        """
-        return get_available_season_dbs()
+        meta_dir = DATA_DIR / "metadata"
+        if not meta_dir.exists():
+            return []
+        seasons = [
+            int(d.name)
+            for d in meta_dir.iterdir()
+            if d.is_dir() and d.name.isdigit()
+        ]
+        return sorted(seasons, reverse=True)
 
     @staticmethod
-    def get_season_stats(season: int) -> Optional[Dict[str, Any]]:
-        """Get statistics for a season."""
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
+    def get_season_stats(season: int) -> Dict[str, Any]:
+        events = DataRepository.get_events_for_season(season)
+        return {"season": season, "events": len(events), "sessions": 0, "laps": 0}
 
-            cursor.execute(
-                "SELECT COUNT(*) as count FROM events WHERE season = ?",
-                (season,)
-            )
-            event_count = cursor.fetchone()['count']
-
-            cursor.execute("""
-                SELECT COUNT(*) as count
-                FROM sessions s
-                JOIN events e ON s.event_id = e.id
-                WHERE e.season = ? AND s.has_data = 1
-            """, (season,))
-            session_count = cursor.fetchone()['count']
-
-            cursor.execute("""
-                SELECT COUNT(*) as count
-                FROM laps l
-                JOIN sessions s ON l.session_id = s.id
-                JOIN events e ON s.event_id = e.id
-                WHERE e.season = ?
-            """, (season,))
-            lap_count = cursor.fetchone()['count']
-
-            return {
-                'season': season,
-                'events': event_count,
-                'sessions': session_count,
-                'laps': lap_count
-            }
-
-    # ===== EVENT METHODS =====
+    # ------------------------------------------------------------ events
 
     @staticmethod
     def get_events_for_season(season: int) -> List[Dict[str, Any]]:
-        """Get all events for a season."""
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, round_number, event_name, location, country,
-                       event_date, event_format
-                FROM events
-                WHERE season = ?
-                ORDER BY round_number
-            """, (season,))
-
-            events = []
-            for row in cursor.fetchall():
-                events.append({
-                    'id': row['id'],
-                    'round': row['round_number'],
-                    'name': row['event_name'],
-                    'location': row['location'],
-                    'country': row['country'],
-                    'date': row['event_date'],
-                    'format': row['event_format']
-                })
-
-            return events
+        df = DataRepository._load_events(season)
+        if df.empty:
+            return []
+        result = []
+        for _, row in df.iterrows():
+            result.append({
+                "id": int(row["id"]),
+                "round": int(row["round_number"]),
+                "name": str(row["event_name"]),
+                "location": str(row.get("location", "") or ""),
+                "country": str(row.get("country", "") or ""),
+                "date": str(row.get("event_date", "") or ""),
+                "format": str(row.get("event_format", "conventional") or "conventional"),
+            })
+        return sorted(result, key=lambda x: x["round"])
 
     @staticmethod
-    def get_event_by_name(
-        season: int, event_name: str
-    ) -> Optional[Dict[str, Any]]:
-        """Get event by season and name (partial match)."""
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, round_number, event_name, location, country,
-                       event_date, event_format
-                FROM events
-                WHERE season = ? AND event_name LIKE ?
-            """, (season, f'%{event_name}%'))
+    def get_event_by_name(season: int, event_name: str) -> Optional[Dict[str, Any]]:
+        df = DataRepository._load_events(season)
+        if df.empty:
+            return None
+        mask = df["event_name"].str.contains(event_name, case=False, na=False)
+        rows = df[mask]
+        if rows.empty:
+            return None
+        row = rows.iloc[0]
+        return {
+            "id": int(row["id"]),
+            "round": int(row["round_number"]),
+            "name": str(row["event_name"]),
+            "location": str(row.get("location", "") or ""),
+            "country": str(row.get("country", "") or ""),
+            "date": str(row.get("event_date", "") or ""),
+            "format": str(row.get("event_format", "conventional") or "conventional"),
+        }
 
-            row = cursor.fetchone()
-            if not row:
-                return None
-
-            return {
-                'id': row['id'],
-                'round': row['round_number'],
-                'name': row['event_name'],
-                'location': row['location'],
-                'country': row['country'],
-                'date': row['event_date'],
-                'format': row['event_format']
-            }
-
-    # ===== SESSION METHODS =====
+    # ------------------------------------------------------------ sessions
 
     @staticmethod
     def get_sessions_for_event(
-        season: int, event_id: int
+        season: int, event_id_or_name: Any
     ) -> List[Dict[str, Any]]:
-        """Get all sessions for an event."""
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, session_type, session_name, session_date,
-                       track_length, total_laps, has_data
-                FROM sessions
-                WHERE event_id = ?
-                ORDER BY
-                    CASE session_type
-                        WHEN 'FP1' THEN 1
-                        WHEN 'FP2' THEN 2
-                        WHEN 'FP3' THEN 3
-                        WHEN 'SQ' THEN 4
-                        WHEN 'S' THEN 5
-                        WHEN 'Q' THEN 6
-                        WHEN 'R' THEN 7
-                        ELSE 99
-                    END
-            """, (event_id,))
+        df = DataRepository._load_sessions(season)
+        if df.empty:
+            return []
 
-            sessions = []
-            for row in cursor.fetchall():
-                sessions.append({
-                    'id': row['id'],
-                    'type': row['session_type'],
-                    'name': row['session_name'],
-                    'date': row['session_date'],
-                    'track_length': row['track_length'],
-                    'total_laps': row['total_laps'],
-                    'has_data': bool(row['has_data'])
-                })
+        if isinstance(event_id_or_name, str):
+            events = DataRepository._load_events(season)
+            mask = events["event_name"].str.contains(
+                event_id_or_name, case=False, na=False
+            )
+            if not mask.any():
+                return []
+            event_id = int(events[mask].iloc[0]["id"])
+        else:
+            event_id = int(event_id_or_name)
 
-            return sessions
+        sess_df = df[df["event_id"] == event_id]
+        order = {"FP1": 1, "FP2": 2, "FP3": 3, "SQ": 4, "S": 5, "Q": 6, "R": 7}
+        result = []
+        for _, row in sess_df.iterrows():
+            result.append({
+                "id": int(row["id"]),
+                "type": str(row["session_type"]),
+                "name": str(row.get("session_name", row["session_type"]) or row["session_type"]),
+                "date": str(row.get("session_date", "") or ""),
+                "track_length": float(row.get("track_length", 0) or 0),
+                "total_laps": int(row.get("total_laps", 0) or 0),
+                "has_data": bool(row.get("has_data", True)),
+            })
+        return sorted(result, key=lambda s: order.get(s["type"], 99))
 
     @staticmethod
     def get_session(
         season: int, event_id: int, session_type: str
     ) -> Optional[Dict[str, Any]]:
-        """Get a specific session."""
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, session_type, session_name, session_date,
-                       track_length, total_laps, has_data
-                FROM sessions
-                WHERE event_id = ? AND session_type = ?
-            """, (event_id, session_type))
+        df = DataRepository._load_sessions(season)
+        if df.empty:
+            return None
+        mask = (df["event_id"] == event_id) & (df["session_type"] == session_type)
+        rows = df[mask]
+        if rows.empty:
+            return None
+        row = rows.iloc[0]
+        return {
+            "id": int(row["id"]),
+            "type": str(row["session_type"]),
+            "name": str(row.get("session_name", row["session_type"]) or row["session_type"]),
+            "date": str(row.get("session_date", "") or ""),
+            "track_length": float(row.get("track_length", 0) or 0),
+            "total_laps": int(row.get("total_laps", 0) or 0),
+            "has_data": bool(row.get("has_data", True)),
+        }
 
-            row = cursor.fetchone()
-            if not row:
-                return None
-
-            return {
-                'id': row['id'],
-                'type': row['session_type'],
-                'name': row['session_name'],
-                'date': row['session_date'],
-                'track_length': row['track_length'],
-                'total_laps': row['total_laps'],
-                'has_data': bool(row['has_data'])
-            }
-
-    # ===== LAP METHODS =====
+    # ------------------------------------------------------------ laps
 
     @staticmethod
     def get_laps_for_session(
         season: int,
         session_id: int,
-        driver_filter: Optional[str] = None
+        driver_filter: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """
-        Get laps for a session, optionally filtered by driver.
-        Tries Event-based Parquet first, falls back to SQLite.
-        """
-        # 1. Resolver qual o event_id dessa sessão
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT event_id FROM sessions WHERE id = ?", (session_id,))
-            row = cursor.fetchone()
-            if not row: return []
-            event_id = row['event_id']
-
-        # 2. Try Event Parquet
-        parquet_path = os.path.join(
-            DataRepository.LAPS_DATA_DIR,
-            str(season),
-            f"event_{event_id}.parquet"
-        )
-        if os.path.exists(parquet_path):
-            try:
-                df = pd.read_parquet(parquet_path)
-                # Filtrar pela sessão específica dentro do evento
-                df = df[df['session_id'] == session_id]
-                
-                if driver_filter:
-                    mask = (df['driver_code'] == driver_filter) | (df['driver_number'] == str(driver_filter))
-                    df = df[mask]
-                return df.to_dict(orient='records')
-            except Exception as e:
-                print(f"Error reading Laps Parquet for event {event_id}: {e}")
-
-        # 3. Fallback to SQLite
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            # ... (resto do fallback igual)
-
+        event_id = DataRepository._event_id_for_session(season, session_id)
+        if event_id is None:
+            return []
+        path = DataRepository._laps_path(season, event_id)
+        if not path.exists():
+            return []
+        try:
+            df = pd.read_parquet(path)
+            df = df[df["session_id"] == session_id]
             if driver_filter:
-                cursor.execute("""
-                    SELECT * FROM laps
-                    WHERE session_id = ?
-                      AND (driver_code = ? OR driver_number = ?)
-                    ORDER BY lap_number
-                """, (session_id, driver_filter, driver_filter))
-            else:
-                cursor.execute("""
-                    SELECT * FROM laps
-                    WHERE session_id = ?
-                    ORDER BY lap_number, driver_number
-                """, (session_id,))
-
-            return [dict(row) for row in cursor.fetchall()]
+                mask = (df["driver_code"] == driver_filter) | (
+                    df["driver_number"] == str(driver_filter)
+                )
+                df = df[mask]
+            return df.to_dict(orient="records")
+        except Exception as e:
+            print(f"Error reading laps parquet (event {event_id}): {e}")
+            return []
 
     @staticmethod
-    def get_drivers_in_session(
-        season: int, session_id: int
-    ) -> List[str]:
-        """Get list of driver codes in a session."""
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT DISTINCT driver_code
-                FROM laps
-                WHERE session_id = ?
-                ORDER BY driver_code
-            """, (session_id,))
-
-            return [row['driver_code'] for row in cursor.fetchall()]
-
-    # ===== TELEMETRY METHODS =====
-
-    @staticmethod
-    def get_telemetry_for_lap(
-        season: int, lap_id: int
-    ) -> List[Dict[str, Any]]:
-        """
-        Get telemetry samples for a specific lap.
-        Tries to read FROM THE EVENT PARQUET first.
-        """
-        # 1. Resolver qual o event_id desse lap_id
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT s.event_id FROM laps l
-                JOIN sessions s ON l.session_id = s.id
-                WHERE l.id = ?
-            """, (lap_id,))
-            row = cursor.fetchone()
-            if not row: return []
-            event_id = row['event_id']
-
-        # 2. Tentar ler do Parquet do EVENTO
-        parquet_path = os.path.join(
-            DataRepository.TELEMETRY_DATA_DIR,
-            str(season),
-            f"event_{event_id}.parquet"
-        )
-
-        if os.path.exists(parquet_path):
-            try:
-                df = pd.read_parquet(parquet_path)
-                if 'lap_id' in df.columns:
-                    df_lap = df[df['lap_id'] == lap_id]
-                    return df_lap.to_dict(orient='records')
-            except Exception as e:
-                print(f"Error reading Event Parquet for lap {lap_id}: {e}")
-
-        # 3. Fallback to SQLite
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM telemetry
-                WHERE lap_id = ?
-                ORDER BY session_time_seconds
-            """, (lap_id,))
-
-            return [dict(row) for row in cursor.fetchall()]
+    def get_drivers_in_session(season: int, session_id: int) -> List[str]:
+        event_id = DataRepository._event_id_for_session(season, session_id)
+        if event_id is None:
+            return []
+        path = DataRepository._laps_path(season, event_id)
+        if not path.exists():
+            return []
+        try:
+            df = pd.read_parquet(path, columns=["session_id", "driver_code"])
+            df = df[df["session_id"] == session_id]
+            return sorted(df["driver_code"].dropna().unique().tolist())
+        except Exception as e:
+            print(f"Error reading drivers (event {event_id}): {e}")
+            return []
 
     @staticmethod
     def get_lap_id(
         season: int, session_id: int, driver_number: str, lap_number: int
     ) -> Optional[int]:
-        """Resolve internal lap id by (session, driver, lap_number)."""
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id FROM laps
-                WHERE session_id = ?
-                  AND (driver_number = ? OR driver_code = ?)
-                  AND lap_number = ?
-            """, (session_id, driver_number, driver_number, lap_number))
+        event_id = DataRepository._event_id_for_session(season, session_id)
+        if event_id is None:
+            return None
+        path = DataRepository._laps_path(season, event_id)
+        if not path.exists():
+            return None
+        try:
+            df = pd.read_parquet(path)
+            mask = (
+                (df["session_id"] == session_id)
+                & (
+                    (df["driver_number"] == str(driver_number))
+                    | (df["driver_code"] == str(driver_number))
+                )
+                & (df["lap_number"] == lap_number)
+            )
+            rows = df[mask]
+            return int(rows.iloc[0]["id"]) if not rows.empty else None
+        except Exception as e:
+            print(f"Error resolving lap_id: {e}")
+            return None
 
-            row = cursor.fetchone()
-            return row['id'] if row else None
+    # ------------------------------------------------------------ telemetry
 
-    # ===== RESULT METHODS =====
+    @staticmethod
+    def _read_telemetry_parquet(season: int, event_id: int) -> pd.DataFrame:
+        """Read telemetry parquet from local disk or GCS fallback."""
+        local = DataRepository._telemetry_path(season, event_id)
+        if local.exists():
+            return pd.read_parquet(local)
+        # Fallback: read directly from GCS (telemetry not downloaded at startup)
+        import os
+        bucket = os.getenv("GCS_BUCKET_NAME", "")
+        if bucket:
+            try:
+                gcs_path = f"gs://{bucket}/telemetry/{season}/event_{event_id}.parquet"
+                return pd.read_parquet(gcs_path)
+            except Exception:
+                pass
+        return pd.DataFrame()
+
+    @staticmethod
+    def get_telemetry_for_lap(
+        season: int, lap_id: int, session_id: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        # If session_id provided, resolve event directly (fast path)
+        if session_id is not None:
+            event_id = DataRepository._event_id_for_session(season, session_id)
+            if event_id is not None:
+                try:
+                    df = DataRepository._read_telemetry_parquet(season, event_id)
+                    if not df.empty and "lap_id" in df.columns:
+                        return df[df["lap_id"] == lap_id].to_dict(orient="records")
+                except Exception as e:
+                    print(f"Error reading telemetry (event {event_id}): {e}")
+                return []
+
+        # Slow path: scan all events (fallback when session_id unknown)
+        sessions_df = DataRepository._load_sessions(season)
+        if sessions_df.empty:
+            return []
+        for event_id in sessions_df["event_id"].unique():
+            try:
+                df = DataRepository._read_telemetry_parquet(season, int(event_id))
+                if not df.empty and "lap_id" in df.columns and lap_id in df["lap_id"].values:
+                    return df[df["lap_id"] == lap_id].to_dict(orient="records")
+            except Exception as e:
+                print(f"Error reading telemetry (event {event_id}): {e}")
+        return []
+
+    def get_track_layout_samples(
+        self, season: int, session_id: int
+    ) -> Dict[str, Any]:
+        return {"x": [], "y": [], "count": 0}
+
+    # ------------------------------------------------------------ results
 
     @staticmethod
     def get_results_for_session(
         season: int, session_id: int
     ) -> List[Dict[str, Any]]:
-        """
-        Get results for a session.
-        Tries Event-based Parquet first.
-        """
-        # 1. Get event_id
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT event_id FROM sessions WHERE id = ?", (session_id,))
-            row = cursor.fetchone()
-            if not row: return []
-            event_id = row['event_id']
+        event_id = DataRepository._event_id_for_session(season, session_id)
+        if event_id is None:
+            return []
+        path = DataRepository._results_path(season, event_id)
+        if not path.exists():
+            return []
+        try:
+            df = pd.read_parquet(path)
+            df = df[df["session_id"] == session_id]
+            return df.to_dict(orient="records")
+        except Exception as e:
+            print(f"Error reading results parquet (event {event_id}): {e}")
+            return []
 
-        # 2. Try Event Parquet
-        parquet_path = os.path.join(
-            DataRepository.RESULTS_DATA_DIR,
-            str(season),
-            f"event_{event_id}.parquet"
-        )
-        if os.path.exists(parquet_path):
-            try:
-                df = pd.read_parquet(parquet_path)
-                df = df[df['session_id'] == session_id]
-                return df.to_dict(orient='records')
-            except Exception as e:
-                print(f"Error reading Results Parquet for event {event_id}: {e}")
-
-        # 3. Fallback to SQLite
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM results
-                WHERE session_id = ?
-                ORDER BY position
-            """, (session_id,))
-
-            return [dict(row) for row in cursor.fetchall()]
-
-    # ===== WEATHER METHODS =====
+    # ------------------------------------------------------------ weather
 
     @staticmethod
     def get_weather_for_session(
         season: int, session_id: int
     ) -> List[Dict[str, Any]]:
-        """
-        Get weather for a session.
-        Tries Event-based Parquet first.
-        """
-        # 1. Get event_id
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT event_id FROM sessions WHERE id = ?", (session_id,))
-            row = cursor.fetchone()
-            if not row: return []
-            event_id = row['event_id']
+        event_id = DataRepository._event_id_for_session(season, session_id)
+        if event_id is None:
+            return []
+        path = DataRepository._weather_path(season, event_id)
+        if not path.exists():
+            return []
+        try:
+            df = pd.read_parquet(path)
+            df = df[df["session_id"] == session_id]
+            return df.to_dict(orient="records")
+        except Exception as e:
+            print(f"Error reading weather parquet (event {event_id}): {e}")
+            return []
 
-        # 2. Try Event Parquet
-        parquet_path = os.path.join(
-            DataRepository.WEATHER_DATA_DIR,
-            str(season),
-            f"event_{event_id}.parquet"
-        )
-        if os.path.exists(parquet_path):
-            try:
-                df = pd.read_parquet(parquet_path)
-                df = df[df['session_id'] == session_id]
-                return df.to_dict(orient='records')
-            except Exception as e:
-                print(f"Error reading Weather Parquet for event {event_id}: {e}")
-
-        # 3. Fallback to SQLite
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM weather
-                WHERE session_id = ?
-                ORDER BY time_seconds
-            """, (session_id,))
-
-            return [dict(row) for row in cursor.fetchall()]
-
-    # ===== RACE CONTROL METHODS =====
-
-    @staticmethod
-    def get_race_control_messages(
-        season: int, session_id: int
-    ) -> List[Dict[str, Any]]:
-        """Get race control messages for a session."""
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM race_control_messages
-                WHERE session_id = ?
-                ORDER BY time_seconds
-            """, (session_id,))
-
-            return [dict(row) for row in cursor.fetchall()]
-
-    # ===== SESSION STATUS METHODS =====
-
-    @staticmethod
-    def get_session_status(
-        season: int, session_id: int
-    ) -> List[Dict[str, Any]]:
-        """Get track status changes for a session."""
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM session_status
-                WHERE session_id = ?
-                ORDER BY time_seconds
-            """, (session_id,))
-
-            return [dict(row) for row in cursor.fetchall()]
-
-    # ===== AVAILABILITY METHODS =====
+    # ------------------------------------------------------------ availability
 
     @staticmethod
     def get_available_data() -> Dict[str, Any]:
-        """
-        Get complete availability map across all season DBs.
-
-        Returns:
-            {
-                "seasons": [2024, 2023],
-                "2024": {
-                    "events": ["Bahrain Grand Prix", ...],
-                    "Bahrain Grand Prix": {
-                        "sessions": ["FP1", "Q", "R"],
-                        "R": {"laps": 1234, "results": 20, ...}
-                    }
-                }
-            }
-        """
-        seasons = get_available_season_dbs()
+        seasons = DataRepository.get_all_seasons()
         result: Dict[str, Any] = {"seasons": seasons}
 
         for season in seasons:
-            try:
-                with get_db_connection(season) as conn:
-                    cursor = conn.cursor()
-
-                    cursor.execute("""
-                        SELECT DISTINCT e.id, e.event_name
-                        FROM events e
-                        JOIN sessions s ON s.event_id = e.id
-                        WHERE e.season = ? AND s.has_data = 1
-                        ORDER BY e.round_number
-                    """, (season,))
-                    events_rows = cursor.fetchall()
-
-                    season_data: Dict[str, Any] = {"events": []}
-
-                    for event_row in events_rows:
-                        event_id = event_row['id']
-                        event_name = event_row['event_name']
-
-                        cursor.execute("""
-                            SELECT id, session_type
-                            FROM sessions
-                            WHERE event_id = ? AND has_data = 1
-                            ORDER BY
-                                CASE session_type
-                                    WHEN 'FP1' THEN 1
-                                    WHEN 'FP2' THEN 2
-                                    WHEN 'FP3' THEN 3
-                                    WHEN 'SQ' THEN 4
-                                    WHEN 'S' THEN 5
-                                    WHEN 'Q' THEN 6
-                                    WHEN 'R' THEN 7
-                                    ELSE 99
-                                END
-                        """, (event_id,))
-                        sessions = cursor.fetchall()
-
-                        if not sessions:
-                            continue
-
-                        season_data["events"].append(event_name)
-                        event_sessions: Dict[str, Any] = {"sessions": []}
-
-                        for session_row in sessions:
-                            stype = session_row['session_type']
-                            event_sessions["sessions"].append(stype)
-
-                        season_data[event_name] = event_sessions
-
-                    result[str(season)] = season_data
-
-            except Exception as e:
-                print(f"⚠️  Could not read season {season} DB: {e}")
+            events_df = DataRepository._load_events(season)
+            sessions_df = DataRepository._load_sessions(season)
+            if events_df.empty:
                 continue
+
+            season_data: Dict[str, Any] = {"events": []}
+
+            for _, event_row in events_df.iterrows():
+                event_id = int(event_row["id"])
+                event_name = str(event_row["event_name"])
+                season_data["events"].append(event_name)
+
+                event_sessions = sessions_df[sessions_df["event_id"] == event_id]
+                sessions_list = []
+                for _, s_row in event_sessions.iterrows():
+                    if bool(s_row.get("has_data", True)):
+                        sessions_list.append(str(s_row["session_type"]))
+
+                season_data[event_name] = {"sessions": sessions_list}
+                for stype in sessions_list:
+                    season_data[event_name][stype] = {"has_data": True}
+
+            result[str(season)] = season_data
 
         return result
 
-    # ===== TRACK LAYOUT METHODS =====
+    # ------------------------------------------------------------ stubs (unused in prod)
 
     @staticmethod
-    def get_track_layout_samples(
-        season: int, session_id: int
-    ) -> Dict[str, Any]:
-        """
-        Get X/Y telemetry from the fastest accurate lap in a session.
-        Used to draw the circuit outline.
-        """
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
+    def get_race_control_messages(season: int, session_id: int) -> List:
+        return []
 
-            # Fastest accurate non-formation lap
-            cursor.execute("""
-                SELECT id FROM laps
-                WHERE session_id = ?
-                  AND lap_time_seconds IS NOT NULL
-                  AND is_accurate = 1
-                  AND lap_number > 1
-                ORDER BY lap_time_seconds ASC
-                LIMIT 1
-            """, (session_id,))
-            row = cursor.fetchone()
-
-            if not row:
-                return {"x": [], "y": [], "count": 0}
-
-            lap_id = row['id']
-
-            cursor.execute("""
-                SELECT x, y FROM telemetry
-                WHERE lap_id = ?
-                ORDER BY session_time_seconds
-            """, (lap_id,))
-            rows = cursor.fetchall()
-
-            return {
-                "x": [r['x'] for r in rows],
-                "y": [r['y'] for r in rows],
-                "count": len(rows)
-            }
-
-    # ===== UTILITY METHODS =====
+    @staticmethod
+    def get_session_status(season: int, session_id: int) -> List:
+        return []
 
     @staticmethod
     def get_database_stats(season: int) -> Dict[str, Any]:
-        """Get statistics for a specific season DB."""
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-
-            def count(table, where=""):
-                q = f"SELECT COUNT(*) as c FROM {table}"
-                if where:
-                    q += f" WHERE {where}"
-                cursor.execute(q)
-                return cursor.fetchone()['c']
-
-            return {
-                'season': season,
-                'events': count('events'),
-                'sessions': count('sessions', 'has_data = 1'),
-                'laps': count('laps'),
-                'telemetry_samples': count('telemetry'),
-                'results': count('results'),
-                'weather_points': count('weather'),
-                'race_control_messages': count('race_control_messages')
-            }
+        return {"season": season}

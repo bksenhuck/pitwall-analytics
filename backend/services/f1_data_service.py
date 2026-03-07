@@ -282,11 +282,14 @@ class F1DataService:
         event: str
     ) -> List[str]:
         """Get list of available session types for an event."""
+        # Try finding via common repository methods
         event_data = self.repo.get_event_by_name(season, event)
         if not event_data:
             return []
 
-        sessions = self.repo.get_sessions_for_event(season, event_data['id'])
+        # If we have an event (even a dummy from the fallback), try getting sessions
+        # In a Parquet-only environment, event_data['id'] will be 0, but we can search by name
+        sessions = self.repo.get_sessions_for_event(season, event_data['id'] if event_data['id'] != 0 else event_data['name'])
         return [s['type'] for s in sessions if s['has_data']]
 
     # ===== STATISTICS =====

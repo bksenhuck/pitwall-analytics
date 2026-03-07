@@ -21,33 +21,31 @@ python scripts/populate_cache.py --season 2024
 
 # 2. Start backend
 python main.py
-
-# 3. Frontend uses /api/data/available to discover data
 ```
 
 **📚 Documentation:**
 - 👉 **[CACHE_V2_SUMMARY.md](CACHE_V2_SUMMARY.md)** - Complete implementation summary
 - 👉 **[docs/CACHE_V2_GUIDE.md](docs/CACHE_V2_GUIDE.md)** - Detailed guide
-- 👉 **[frontend_integration_example.py](frontend_integration_example.py)** - Integration example
 
 ---
 
 ## Structure
 
-- `app.py` - main Dash app and routing
-- `pages/` - Dash multipage app pages (`home.py`, `analytics.py`)
-- `data_loader.py` - wrappers for FastF1 session loading and caching
-- `charts.py` - Plotly chart helper functions
-- `assets/style.css` - minimal styling
+- `app.py` - main Dash app (compatibility)
+- `main.py` - main Production app (FastAPI + Dash)
+- `backend/` - FastAPI API services
+- `frontend/` - Dash UI pages and components
+- `scripts/` - CLI tools for data population
+- `assets/` - Static assets (CSS, images)
 - `requirements.txt` - dependencies
 
 ## Setup
 
-1. Create and activate a Python virtualenv (optional but recommended)
+1. Create and activate a Python virtualenv
 
 ```bash
-python -m venv venv
-venv\Scripts\activate
+python -m venv venv_pitwall_analytics
+venv_pitwall_analytics\Scripts\activate
 ```
 
 2. Install requirements
@@ -56,29 +54,35 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-3. Run the app
+3. Run the app (Development)
 
 ```bash
-python app.py
+python run.py
 ```
 
-4. Open http://127.0.0.1:8050 in your browser.
+4. Run the app (Production)
 
-## Data Population (NEW! ⚡)
+```bash
+python main.py
+```
 
-This project now includes an **automatic cache population system** that intelligently downloads ALL available F1 data from FastF1.
+5. Open http://127.0.0.1:8000 in your browser.
+
+## Data Population (⚡)
+
+This project uses a high-performance SQLite cache. You must download the data before it can be used.
 
 ### Quick Start
 
 ```bash
-# Check what data is available for 2024
-python scripts/auto_populate_cache.py --season 2024 --check
+# List available data in the cache
+python scripts/populate_cache.py --list
 
 # Download all 2024 data
-python scripts/auto_populate_cache.py --season 2024
+python scripts/populate_cache.py --season 2024
 
-# Download everything from 2023 onwards
-python scripts/auto_populate_cache.py --from 2023
+# Download everything from 2023 to 2024
+python scripts/populate_cache.py --from 2023 --to 2024
 ```
 
 ### What gets loaded?
@@ -95,7 +99,7 @@ For each session (FP1, FP2, FP3, Qualifying, Sprint, Race):
 
 ## Notes
 
-- The system uses SQLite cache in `data/pitwall_cache.db` for fast access
+- The system uses SQLite cache in `data/` (one file per season) for fast access
 - Backend serves data from cache; frontend never hits FastF1 directly
 - First-time data load per season takes ~30-60 minutes
 
@@ -103,8 +107,7 @@ For each session (FP1, FP2, FP3, Qualifying, Sprint, Race):
 
 Complete documentation is available in the [`docs/`](docs/) folder:
 
-- **[docs/AUTO_CACHE_GUIDE.md](docs/AUTO_CACHE_GUIDE.md)** - Complete cache auto-population guide ⭐
-- **[docs/MANUAL_CACHE_CONTROL.md](docs/MANUAL_CACHE_CONTROL.md)** - Manual cache control
+- **[docs/CACHE_V2_GUIDE.md](docs/CACHE_V2_GUIDE.md)** - Detailed guide
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** - System architecture
 - **[docs/DEPLOY.md](docs/DEPLOY.md)** - Deployment guide
 - **[scripts/README.md](scripts/README.md)** - CLI tools documentation

@@ -52,28 +52,20 @@ def create_app() -> FastAPI:
     # Register routers (equivalent to Flask blueprints)
     from backend.api.health import router as health_router
     from backend.api.data import router as data_router
-    from backend.routes.data import router as cached_data_router
-    
+
     app.include_router(health_router, prefix="/api", tags=["Health"])
     app.include_router(data_router, prefix="/api", tags=["Data"])
-    app.include_router(cached_data_router, prefix="/api/cached", tags=["Cached Data (Legacy)"])
     
     # Startup event: Initialize services
     @app.on_event("startup")
     async def startup_event():
-        """Initialize services on startup"""
-        # Initialize FastF1 cache
-        from backend.services.cache_service import init_cache
-        init_cache(config.CACHE_DIR, config.CACHE_ENABLED)
-        print("✅ FastF1 cache initialized")
-        
-        # DBs are created per-season by populate_cache.py
+        """Log available season DBs on startup."""
         from backend.db.session import get_available_season_dbs
         seasons = get_available_season_dbs()
         if seasons:
-            print(f"✅ Found season DBs: {seasons}")
+            print(f"Found season DBs: {seasons}")
         else:
-            print("⚠️  No season DBs found. Run populate_cache.py first.")
+            print("No season DBs found. Run populate_cache.py first.")
     
     return app
 

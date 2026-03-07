@@ -1,13 +1,19 @@
 """Analytics › Campeonato — tabela e progressão de pontos."""
+import io
 import dash
 from dash import html, dcc, Input, Output, State
 import pandas as pd
-import io
+import plotly.graph_objs as go
 
 from frontend.components.navigation import create_analytics_subnav
 from frontend.components.charts import _base_layout
 from frontend.f1_config import color_list_for_drivers, color_list_for_teams
 from frontend.api import client
+from frontend.utils import (
+    alert_cache_empty,
+    alert_backend_error,
+    seasons_to_options,
+)
 
 dash.register_page(__name__, path="/analytics/campeonato", name="Campeonato")
 
@@ -25,7 +31,7 @@ layout = html.Div([
 
     html.Div(id="camp-warning"),
 
-    # ── Filtros ─────────────────────────────────────────────────
+    # ── Filtros ──────────────────────────────────────────────────
     html.Div([
         html.Div([
             html.Label("Temporada"),
@@ -54,7 +60,6 @@ layout = html.Div([
 
     html.Div(id="camp-kpi-row", className="kpi-row"),
 
-    # Chart workspace: sidebar (visualizações) + chart area
     html.Div([
         html.Div([
             html.Div("Visualizações", className="chart-sidebar-title"),
@@ -85,8 +90,7 @@ layout = html.Div([
 ])
 
 
-# ── Callbacks ───────────────────────────────────────────────────
-
+# ── Callbacks ────────────────────────────────────────────────────
 
 @dash.callback(
     Output("camp-season-dropdown", "options"),
@@ -98,21 +102,11 @@ def load_seasons(_):
     try:
         seasons = client.get_available_seasons()
         if not seasons:
-            return [], None, html.Div([
-                html.Span("⚠", className="alert-icon"),
-                html.Strong("Nenhum dado no cache SQLite."),
-            ], className="alert alert-warning")
-        return (
-            [{"label": str(s), "value": s} for s in seasons],
-            seasons[0],
-            None,
-        )
+            return [], None, alert_cache_empty()
+        return seasons_to_options(seasons), seasons[0], None
     except Exception as e:
         print(f"Error loading seasons: {e}")
-        return [], None, html.Div([
-            html.Span("✕", className="alert-icon"),
-            html.Strong("Não foi possível conectar ao backend."),
-        ], className="alert alert-error")
+        return [], None, alert_backend_error()
 
 
 @dash.callback(
@@ -139,9 +133,9 @@ def load_data(n_clicks, season):
             return None
 
         results_df = pd.concat(results_rows, ignore_index=True)
-        results_df["points"] = (
-            pd.to_numeric(results_df["points"], errors="coerce").fillna(0)
-        )
+        results_df["points"] = pd.to_numeric(
+            results_df["points"], errors="coerce"
+        ).fillna(0)
         return results_df.to_json(date_format="iso", orient="split")
     except Exception as e:
         print(f"Error loading championship data: {e}")
@@ -149,15 +143,12 @@ def load_data(n_clicks, season):
 
 
 def _compute_figs(results_json, season):
-    import plotly.graph_objs as go
-
     empty = {"data": [], "layout": _base_layout("Nenhum dado carregado")}
     if not results_json:
-        return empty, empty, empty, []
+        return empty, empty, []
 
     df = pd.read_json(io.StringIO(results_json), orient="split")
 
-    # driver points
     driver_pts = (
         df.groupby("driver_code")["points"]
         .sum()
@@ -183,7 +174,6 @@ def _compute_figs(results_json, season):
         yaxis=dict(autorange=True),
     ))
 
-    # team points
     team_pts = (
         df.groupby("team")["points"]
         .sum()
@@ -207,7 +197,6 @@ def _compute_figs(results_json, season):
         yaxis=dict(autorange=True),
     ))
 
-    # KPIs
     leader_driver = (
         driver_pts.iloc[0]
         if not driver_pts.empty
@@ -231,7 +220,7 @@ def _compute_figs(results_json, season):
         ),
         kpi(
             "Líder (Construtores)",
-            leader_team["team"] if "team" in leader_team else "—",
+            leader_team.get("team", "—"),
         ),
         kpi("Corridas", df["Race"].nunique()),
     ]
@@ -240,8 +229,6 @@ def _compute_figs(results_json, season):
 
 
 def _build_progression_fig(results_json, season, selected_driver=None):
-    import plotly.graph_objs as go
-
     empty = {"data": [], "layout": _base_layout("Nenhum dado carregado")}
     if not results_json:
         return empty
@@ -254,16 +241,16 @@ def _build_progression_fig(results_json, season, selected_driver=None):
         .reset_index()
         .sort_values("points", ascending=False)
     )
-    # Pegar todos os pilotos que pontuaram para não faltar ninguém no gráfico
-    all_scored = driver_pts[driver_pts["points"] > 0]["driver_code"].tolist()
-    
-    # Se houver muitos pilotos (ex: mais de 20), podemos limitar, mas para F1 10 é pouco.
-    # Vamos mostrar todos os que pontuaram na temporada.
-    display_drivers = all_scored if all_scored else driver_pts["driver_code"].head(20).tolist()
+    scored = driver_pts[driver_pts["points"] > 0]["driver_code"].tolist()
+    display_drivers = (
+        scored if scored
+        else driver_pts["driver_code"].head(20).tolist()
+    )
 
     df = df.sort_values("Race")
-    # Remover " Grand Prix" para encurtar o eixo X
-    df["RaceShort"] = df["Race"].str.replace(" Grand Prix", "", case=False)
+    df["RaceShort"] = df["Race"].str.replace(
+        " Grand Prix", "", case=False, regex=False
+    )
     df["CumPoints"] = df.groupby("driver_code")["points"].cumsum()
 
     fig = go.Figure()
@@ -280,33 +267,35 @@ def _build_progression_fig(results_json, season, selected_driver=None):
             line=dict(color=color, width=2.5 if is_active else 1.0),
             marker=dict(size=7 if is_active else 4, color=color),
             opacity=1.0 if is_active else 0.1,
-            hovertemplate="<b>%{customdata[0]}</b><br>Corrida: %{x}<br>Pontos: %{y}<extra></extra>",
+            hovertemplate=(
+                "<b>%{customdata[0]}</b><br>"
+                "Corrida: %{x}<br>Pontos: %{y}<extra></extra>"
+            ),
         ))
 
-    layout = _base_layout(
+    layout_cfg = _base_layout(
         "Progressão de Pontos na Temporada",
         xaxis_title="Corrida",
         yaxis_title="Pontos acumulados",
         hovermode="closest",
     )
     if selected_driver:
-        layout["annotations"][0]["text"] = (
+        layout_cfg["annotations"][0]["text"] = (
             f"<b>Progressão de Pontos</b>"
             f"  <span style='font-size:11px;color:#6B7280'>"
-            f"— {selected_driver} em destaque · clique novamente para resetar"
-            f"</span>"
+            f"— {selected_driver} em destaque"
+            f" · clique novamente para resetar</span>"
         )
     else:
-        layout["annotations"][0]["text"] = (
+        layout_cfg["annotations"][0]["text"] = (
             "<b>Progressão de Pontos na Temporada</b>"
-            "  <span style='font-size:11px;color:#6B7280'>clique em uma linha para destacar</span>"
+            "  <span style='font-size:11px;color:#6B7280'>"
+            "clique em uma linha para destacar</span>"
         )
-    
-    # Aumentar altura do gráfico
-    layout["height"] = 650
-    layout["margin"] = dict(t=80, b=120, l=60, r=40) # Aumentar margem inferior para nomes inclinados
-    
-    fig.update_layout(**layout)
+
+    layout_cfg["height"] = 650
+    layout_cfg["margin"] = dict(t=80, b=120, l=60, r=40)
+    fig.update_layout(**layout_cfg)
     return fig
 
 
@@ -318,7 +307,6 @@ def _build_progression_fig(results_json, season, selected_driver=None):
     prevent_initial_call=True,
 )
 def reset_selected_on_load(n_clicks, season):
-    # Delega o carregamento ao callback original; aqui só reseta o driver
     return dash.no_update, None
 
 
@@ -341,9 +329,23 @@ def update_content(results_json, chart_type, season):
     fig_drivers, fig_teams, kpis = _compute_figs(results_json, season)
 
     if chart_type == "drivers":
-        return dcc.Graph(figure=(fig_drivers or empty_fig), config={"staticPlot": True}), SHOW, HIDE
+        return (
+            dcc.Graph(
+                figure=(fig_drivers or empty_fig),
+                config={"staticPlot": True},
+            ),
+            SHOW,
+            HIDE,
+        )
     if chart_type == "teams":
-        return dcc.Graph(figure=(fig_teams or empty_fig), config={"staticPlot": True}), SHOW, HIDE
+        return (
+            dcc.Graph(
+                figure=(fig_teams or empty_fig),
+                config={"staticPlot": True},
+            ),
+            SHOW,
+            HIDE,
+        )
 
     return html.Div(), SHOW, HIDE
 
@@ -355,7 +357,9 @@ def update_content(results_json, chart_type, season):
     State("camp-season-dropdown", "value"),
     State("camp-chart-selector", "value"),
 )
-def update_progression_figure(results_json, selected_driver, season, chart_type):
+def update_progression_figure(
+    results_json, selected_driver, season, chart_type
+):
     if chart_type != "progression":
         return dash.no_update
     return _build_progression_fig(results_json, season, selected_driver)

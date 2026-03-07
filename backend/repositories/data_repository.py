@@ -7,8 +7,10 @@ pitwall_{year}.db files.
 """
 import os
 import pandas as pd
-from backend.db.session import get_db_connection, get_available_season_dbs
 from typing import Optional, List, Dict, Any
+
+from backend.db.session import get_db_connection, get_available_season_dbs
+from backend.db.utils import db_fetchone, db_fetchall
 
 
 class DataRepository:
@@ -16,9 +18,9 @@ class DataRepository:
 
     # Local storage for optimized files
     TELEMETRY_DATA_DIR = os.path.join("data", "telemetry")
-    LAPS_DATA_DIR      = os.path.join("data", "laps")
-    WEATHER_DATA_DIR   = os.path.join("data", "weather")
-    RESULTS_DATA_DIR   = os.path.join("data", "results")
+    LAPS_DATA_DIR = os.path.join("data", "laps")
+    WEATHER_DATA_DIR = os.path.join("data", "weather")
+    RESULTS_DATA_DIR = os.path.join("data", "results")
 
     # ===== SEASON METHODS =====
 
@@ -35,95 +37,81 @@ class DataRepository:
     @staticmethod
     def get_season_stats(season: int) -> Optional[Dict[str, Any]]:
         """Get statistics for a season."""
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
+        event_count = (db_fetchone(
+            season,
+            "SELECT COUNT(*) as count FROM events WHERE season = ?",
+            (season,),
+        ) or {}).get("count", 0)
 
-            cursor.execute(
-                "SELECT COUNT(*) as count FROM events WHERE season = ?",
-                (season,)
-            )
-            event_count = cursor.fetchone()['count']
+        session_count = (db_fetchone(season, """
+            SELECT COUNT(*) as count
+            FROM sessions s
+            JOIN events e ON s.event_id = e.id
+            WHERE e.season = ? AND s.has_data = 1
+        """, (season,)) or {}).get("count", 0)
 
-            cursor.execute("""
-                SELECT COUNT(*) as count
-                FROM sessions s
-                JOIN events e ON s.event_id = e.id
-                WHERE e.season = ? AND s.has_data = 1
-            """, (season,))
-            session_count = cursor.fetchone()['count']
+        lap_count = (db_fetchone(season, """
+            SELECT COUNT(*) as count
+            FROM laps l
+            JOIN sessions s ON l.session_id = s.id
+            JOIN events e ON s.event_id = e.id
+            WHERE e.season = ?
+        """, (season,)) or {}).get("count", 0)
 
-            cursor.execute("""
-                SELECT COUNT(*) as count
-                FROM laps l
-                JOIN sessions s ON l.session_id = s.id
-                JOIN events e ON s.event_id = e.id
-                WHERE e.season = ?
-            """, (season,))
-            lap_count = cursor.fetchone()['count']
-
-            return {
-                'season': season,
-                'events': event_count,
-                'sessions': session_count,
-                'laps': lap_count
-            }
+        return {
+            "season": season,
+            "events": event_count,
+            "sessions": session_count,
+            "laps": lap_count,
+        }
 
     # ===== EVENT METHODS =====
 
     @staticmethod
     def get_events_for_season(season: int) -> List[Dict[str, Any]]:
         """Get all events for a season."""
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, round_number, event_name, location, country,
-                       event_date, event_format
-                FROM events
-                WHERE season = ?
-                ORDER BY round_number
-            """, (season,))
-
-            events = []
-            for row in cursor.fetchall():
-                events.append({
-                    'id': row['id'],
-                    'round': row['round_number'],
-                    'name': row['event_name'],
-                    'location': row['location'],
-                    'country': row['country'],
-                    'date': row['event_date'],
-                    'format': row['event_format']
-                })
-
-            return events
+        rows = db_fetchall(season, """
+            SELECT id, round_number, event_name, location, country,
+                   event_date, event_format
+            FROM events
+            WHERE season = ?
+            ORDER BY round_number
+        """, (season,))
+        return [
+            {
+                "id": r["id"],
+                "round": r["round_number"],
+                "name": r["event_name"],
+                "location": r["location"],
+                "country": r["country"],
+                "date": r["event_date"],
+                "format": r["event_format"],
+            }
+            for r in rows
+        ]
 
     @staticmethod
     def get_event_by_name(
         season: int, event_name: str
     ) -> Optional[Dict[str, Any]]:
         """Get event by season and name (partial match)."""
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, round_number, event_name, location, country,
-                       event_date, event_format
-                FROM events
-                WHERE season = ? AND event_name LIKE ?
-            """, (season, f'%{event_name}%'))
-
-            row = cursor.fetchone()
-            if not row:
-                return None
-
-            return {
-                'id': row['id'],
-                'round': row['round_number'],
-                'name': row['event_name'],
-                'location': row['location'],
-                'country': row['country'],
-                'date': row['event_date'],
-                'format': row['event_format']
-            }
+        row = db_fetchone(season, """
+            SELECT id, round_number, event_name, location, country,
+                   event_date, event_format
+            FROM events
+            WHERE season = ? AND event_name LIKE ?
+        """, (season, f"%{event_name}%"))
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "round": row["round_number"],
+            "name": row["event_name"],
+            "location": row["location"],
+            "country": row["country"],
+            "date": row["event_date"],
+            "format": row["event_format"],
+        }
 
     # ===== SESSION METHODS =====
 
@@ -132,67 +120,58 @@ class DataRepository:
         season: int, event_id: int
     ) -> List[Dict[str, Any]]:
         """Get all sessions for an event."""
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, session_type, session_name, session_date,
-                       track_length, total_laps, has_data
-                FROM sessions
-                WHERE event_id = ?
-                ORDER BY
-                    CASE session_type
-                        WHEN 'FP1' THEN 1
-                        WHEN 'FP2' THEN 2
-                        WHEN 'FP3' THEN 3
-                        WHEN 'SQ' THEN 4
-                        WHEN 'S' THEN 5
-                        WHEN 'Q' THEN 6
-                        WHEN 'R' THEN 7
-                        ELSE 99
-                    END
-            """, (event_id,))
-
-            sessions = []
-            for row in cursor.fetchall():
-                sessions.append({
-                    'id': row['id'],
-                    'type': row['session_type'],
-                    'name': row['session_name'],
-                    'date': row['session_date'],
-                    'track_length': row['track_length'],
-                    'total_laps': row['total_laps'],
-                    'has_data': bool(row['has_data'])
-                })
-
-            return sessions
+        rows = db_fetchall(season, """
+            SELECT id, session_type, session_name, session_date,
+                   track_length, total_laps, has_data
+            FROM sessions
+            WHERE event_id = ?
+            ORDER BY
+                CASE session_type
+                    WHEN 'FP1' THEN 1
+                    WHEN 'FP2' THEN 2
+                    WHEN 'FP3' THEN 3
+                    WHEN 'SQ'  THEN 4
+                    WHEN 'S'   THEN 5
+                    WHEN 'Q'   THEN 6
+                    WHEN 'R'   THEN 7
+                    ELSE 99
+                END
+        """, (event_id,))
+        return [
+            {
+                "id": r["id"],
+                "type": r["session_type"],
+                "name": r["session_name"],
+                "date": r["session_date"],
+                "track_length": r["track_length"],
+                "total_laps": r["total_laps"],
+                "has_data": bool(r["has_data"]),
+            }
+            for r in rows
+        ]
 
     @staticmethod
     def get_session(
         season: int, event_id: int, session_type: str
     ) -> Optional[Dict[str, Any]]:
         """Get a specific session."""
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, session_type, session_name, session_date,
-                       track_length, total_laps, has_data
-                FROM sessions
-                WHERE event_id = ? AND session_type = ?
-            """, (event_id, session_type))
-
-            row = cursor.fetchone()
-            if not row:
-                return None
-
-            return {
-                'id': row['id'],
-                'type': row['session_type'],
-                'name': row['session_name'],
-                'date': row['session_date'],
-                'track_length': row['track_length'],
-                'total_laps': row['total_laps'],
-                'has_data': bool(row['has_data'])
-            }
+        row = db_fetchone(season, """
+            SELECT id, session_type, session_name, session_date,
+                   track_length, total_laps, has_data
+            FROM sessions
+            WHERE event_id = ? AND session_type = ?
+        """, (event_id, session_type))
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "type": row["session_type"],
+            "name": row["session_name"],
+            "date": row["session_date"],
+            "track_length": row["track_length"],
+            "total_laps": row["total_laps"],
+            "has_data": bool(row["has_data"]),
+        }
 
     # ===== LAP METHODS =====
 
@@ -200,75 +179,67 @@ class DataRepository:
     def get_laps_for_session(
         season: int,
         session_id: int,
-        driver_filter: Optional[str] = None
+        driver_filter: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Get laps for a session, optionally filtered by driver.
         Tries Event-based Parquet first, falls back to SQLite.
         """
-        # 1. Resolver qual o event_id dessa sessão
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT event_id FROM sessions WHERE id = ?", (session_id,))
-            row = cursor.fetchone()
-            if not row: return []
-            event_id = row['event_id']
+        row = db_fetchone(
+            season,
+            "SELECT event_id FROM sessions WHERE id = ?",
+            (session_id,),
+        )
+        if not row:
+            return []
+        event_id = row["event_id"]
 
-        # 2. Try Event Parquet
         parquet_path = os.path.join(
             DataRepository.LAPS_DATA_DIR,
             str(season),
-            f"event_{event_id}.parquet"
+            f"event_{event_id}.parquet",
         )
         if os.path.exists(parquet_path):
             try:
                 df = pd.read_parquet(parquet_path)
-                # Filtrar pela sessão específica dentro do evento
-                df = df[df['session_id'] == session_id]
-                
+                df = df[df["session_id"] == session_id]
                 if driver_filter:
-                    mask = (df['driver_code'] == driver_filter) | (df['driver_number'] == str(driver_filter))
+                    mask = (
+                        (df["driver_code"] == driver_filter)
+                        | (df["driver_number"] == str(driver_filter))
+                    )
                     df = df[mask]
-                return df.to_dict(orient='records')
+                return df.to_dict(orient="records")
             except Exception as e:
                 print(f"Error reading Laps Parquet for event {event_id}: {e}")
 
-        # 3. Fallback to SQLite
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            # ... (resto do fallback igual)
+        # SQLite fallback
+        if driver_filter:
+            return db_fetchall(season, """
+                SELECT * FROM laps
+                WHERE session_id = ?
+                  AND (driver_code = ? OR driver_number = ?)
+                ORDER BY lap_number
+            """, (session_id, driver_filter, driver_filter))
 
-            if driver_filter:
-                cursor.execute("""
-                    SELECT * FROM laps
-                    WHERE session_id = ?
-                      AND (driver_code = ? OR driver_number = ?)
-                    ORDER BY lap_number
-                """, (session_id, driver_filter, driver_filter))
-            else:
-                cursor.execute("""
-                    SELECT * FROM laps
-                    WHERE session_id = ?
-                    ORDER BY lap_number, driver_number
-                """, (session_id,))
-
-            return [dict(row) for row in cursor.fetchall()]
+        return db_fetchall(season, """
+            SELECT * FROM laps
+            WHERE session_id = ?
+            ORDER BY lap_number, driver_number
+        """, (session_id,))
 
     @staticmethod
     def get_drivers_in_session(
         season: int, session_id: int
     ) -> List[str]:
         """Get list of driver codes in a session."""
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT DISTINCT driver_code
-                FROM laps
-                WHERE session_id = ?
-                ORDER BY driver_code
-            """, (session_id,))
-
-            return [row['driver_code'] for row in cursor.fetchall()]
+        rows = db_fetchall(season, """
+            SELECT DISTINCT driver_code
+            FROM laps
+            WHERE session_id = ?
+            ORDER BY driver_code
+        """, (session_id,))
+        return [r["driver_code"] for r in rows]
 
     # ===== TELEMETRY METHODS =====
 
@@ -278,63 +249,48 @@ class DataRepository:
     ) -> List[Dict[str, Any]]:
         """
         Get telemetry samples for a specific lap.
-        Tries to read FROM THE EVENT PARQUET first.
+        Tries Event-based Parquet first, falls back to SQLite.
         """
-        # 1. Resolver qual o event_id desse lap_id
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT s.event_id FROM laps l
-                JOIN sessions s ON l.session_id = s.id
-                WHERE l.id = ?
-            """, (lap_id,))
-            row = cursor.fetchone()
-            if not row: return []
-            event_id = row['event_id']
+        row = db_fetchone(season, """
+            SELECT s.event_id FROM laps l
+            JOIN sessions s ON l.session_id = s.id
+            WHERE l.id = ?
+        """, (lap_id,))
+        if not row:
+            return []
+        event_id = row["event_id"]
 
-        # 2. Tentar ler do Parquet do EVENTO
         parquet_path = os.path.join(
             DataRepository.TELEMETRY_DATA_DIR,
             str(season),
-            f"event_{event_id}.parquet"
+            f"event_{event_id}.parquet",
         )
-
         if os.path.exists(parquet_path):
             try:
                 df = pd.read_parquet(parquet_path)
-                if 'lap_id' in df.columns:
-                    df_lap = df[df['lap_id'] == lap_id]
-                    return df_lap.to_dict(orient='records')
+                if "lap_id" in df.columns:
+                    return df[df["lap_id"] == lap_id].to_dict(orient="records")
             except Exception as e:
-                print(f"Error reading Event Parquet for lap {lap_id}: {e}")
+                print(f"Error reading Telemetry Parquet for lap {lap_id}: {e}")
 
-        # 3. Fallback to SQLite
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM telemetry
-                WHERE lap_id = ?
-                ORDER BY session_time_seconds
-            """, (lap_id,))
-
-            return [dict(row) for row in cursor.fetchall()]
+        return db_fetchall(season, """
+            SELECT * FROM telemetry
+            WHERE lap_id = ?
+            ORDER BY session_time_seconds
+        """, (lap_id,))
 
     @staticmethod
     def get_lap_id(
         season: int, session_id: int, driver_number: str, lap_number: int
     ) -> Optional[int]:
         """Resolve internal lap id by (session, driver, lap_number)."""
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id FROM laps
-                WHERE session_id = ?
-                  AND (driver_number = ? OR driver_code = ?)
-                  AND lap_number = ?
-            """, (session_id, driver_number, driver_number, lap_number))
-
-            row = cursor.fetchone()
-            return row['id'] if row else None
+        row = db_fetchone(season, """
+            SELECT id FROM laps
+            WHERE session_id = ?
+              AND (driver_number = ? OR driver_code = ?)
+              AND lap_number = ?
+        """, (session_id, driver_number, driver_number, lap_number))
+        return row["id"] if row else None
 
     # ===== RESULT METHODS =====
 
@@ -344,40 +300,37 @@ class DataRepository:
     ) -> List[Dict[str, Any]]:
         """
         Get results for a session.
-        Tries Event-based Parquet first.
+        Tries Event-based Parquet first, falls back to SQLite.
         """
-        # 1. Get event_id
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT event_id FROM sessions WHERE id = ?", (session_id,))
-            row = cursor.fetchone()
-            if not row: return []
-            event_id = row['event_id']
+        row = db_fetchone(
+            season,
+            "SELECT event_id FROM sessions WHERE id = ?",
+            (session_id,),
+        )
+        if not row:
+            return []
+        event_id = row["event_id"]
 
-        # 2. Try Event Parquet
         parquet_path = os.path.join(
             DataRepository.RESULTS_DATA_DIR,
             str(season),
-            f"event_{event_id}.parquet"
+            f"event_{event_id}.parquet",
         )
         if os.path.exists(parquet_path):
             try:
                 df = pd.read_parquet(parquet_path)
-                df = df[df['session_id'] == session_id]
-                return df.to_dict(orient='records')
+                df = df[df["session_id"] == session_id]
+                return df.to_dict(orient="records")
             except Exception as e:
-                print(f"Error reading Results Parquet for event {event_id}: {e}")
+                print(
+                    f"Error reading Results Parquet for event {event_id}: {e}"
+                )
 
-        # 3. Fallback to SQLite
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM results
-                WHERE session_id = ?
-                ORDER BY position
-            """, (session_id,))
-
-            return [dict(row) for row in cursor.fetchall()]
+        return db_fetchall(season, """
+            SELECT * FROM results
+            WHERE session_id = ?
+            ORDER BY position
+        """, (session_id,))
 
     # ===== WEATHER METHODS =====
 
@@ -387,40 +340,37 @@ class DataRepository:
     ) -> List[Dict[str, Any]]:
         """
         Get weather for a session.
-        Tries Event-based Parquet first.
+        Tries Event-based Parquet first, falls back to SQLite.
         """
-        # 1. Get event_id
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT event_id FROM sessions WHERE id = ?", (session_id,))
-            row = cursor.fetchone()
-            if not row: return []
-            event_id = row['event_id']
+        row = db_fetchone(
+            season,
+            "SELECT event_id FROM sessions WHERE id = ?",
+            (session_id,),
+        )
+        if not row:
+            return []
+        event_id = row["event_id"]
 
-        # 2. Try Event Parquet
         parquet_path = os.path.join(
             DataRepository.WEATHER_DATA_DIR,
             str(season),
-            f"event_{event_id}.parquet"
+            f"event_{event_id}.parquet",
         )
         if os.path.exists(parquet_path):
             try:
                 df = pd.read_parquet(parquet_path)
-                df = df[df['session_id'] == session_id]
-                return df.to_dict(orient='records')
+                df = df[df["session_id"] == session_id]
+                return df.to_dict(orient="records")
             except Exception as e:
-                print(f"Error reading Weather Parquet for event {event_id}: {e}")
+                print(
+                    f"Error reading Weather Parquet for event {event_id}: {e}"
+                )
 
-        # 3. Fallback to SQLite
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM weather
-                WHERE session_id = ?
-                ORDER BY time_seconds
-            """, (session_id,))
-
-            return [dict(row) for row in cursor.fetchall()]
+        return db_fetchall(season, """
+            SELECT * FROM weather
+            WHERE session_id = ?
+            ORDER BY time_seconds
+        """, (session_id,))
 
     # ===== RACE CONTROL METHODS =====
 
@@ -429,15 +379,11 @@ class DataRepository:
         season: int, session_id: int
     ) -> List[Dict[str, Any]]:
         """Get race control messages for a session."""
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM race_control_messages
-                WHERE session_id = ?
-                ORDER BY time_seconds
-            """, (session_id,))
-
-            return [dict(row) for row in cursor.fetchall()]
+        return db_fetchall(season, """
+            SELECT * FROM race_control_messages
+            WHERE session_id = ?
+            ORDER BY time_seconds
+        """, (session_id,))
 
     # ===== SESSION STATUS METHODS =====
 
@@ -446,15 +392,11 @@ class DataRepository:
         season: int, session_id: int
     ) -> List[Dict[str, Any]]:
         """Get track status changes for a session."""
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM session_status
-                WHERE session_id = ?
-                ORDER BY time_seconds
-            """, (session_id,))
-
-            return [dict(row) for row in cursor.fetchall()]
+        return db_fetchall(season, """
+            SELECT * FROM session_status
+            WHERE session_id = ?
+            ORDER BY time_seconds
+        """, (session_id,))
 
     # ===== AVAILABILITY METHODS =====
 
@@ -470,7 +412,6 @@ class DataRepository:
                     "events": ["Bahrain Grand Prix", ...],
                     "Bahrain Grand Prix": {
                         "sessions": ["FP1", "Q", "R"],
-                        "R": {"laps": 1234, "results": 20, ...}
                     }
                 }
             }
@@ -495,8 +436,8 @@ class DataRepository:
                     season_data: Dict[str, Any] = {"events": []}
 
                     for event_row in events_rows:
-                        event_id = event_row['id']
-                        event_name = event_row['event_name']
+                        event_id = event_row["id"]
+                        event_name = event_row["event_name"]
 
                         cursor.execute("""
                             SELECT id, session_type
@@ -507,10 +448,10 @@ class DataRepository:
                                     WHEN 'FP1' THEN 1
                                     WHEN 'FP2' THEN 2
                                     WHEN 'FP3' THEN 3
-                                    WHEN 'SQ' THEN 4
-                                    WHEN 'S' THEN 5
-                                    WHEN 'Q' THEN 6
-                                    WHEN 'R' THEN 7
+                                    WHEN 'SQ'  THEN 4
+                                    WHEN 'S'   THEN 5
+                                    WHEN 'Q'   THEN 6
+                                    WHEN 'R'   THEN 7
                                     ELSE 99
                                 END
                         """, (event_id,))
@@ -520,18 +461,16 @@ class DataRepository:
                             continue
 
                         season_data["events"].append(event_name)
-                        event_sessions: Dict[str, Any] = {"sessions": []}
-
-                        for session_row in sessions:
-                            stype = session_row['session_type']
-                            event_sessions["sessions"].append(stype)
-
-                        season_data[event_name] = event_sessions
+                        season_data[event_name] = {
+                            "sessions": [
+                                s["session_type"] for s in sessions
+                            ]
+                        }
 
                     result[str(season)] = season_data
 
             except Exception as e:
-                print(f"⚠️  Could not read season {season} DB: {e}")
+                print(f"Could not read season {season} DB: {e}")
                 continue
 
         return result
@@ -546,61 +485,61 @@ class DataRepository:
         Get X/Y telemetry from the fastest accurate lap in a session.
         Used to draw the circuit outline.
         """
-        with get_db_connection(season) as conn:
-            cursor = conn.cursor()
+        lap = db_fetchone(season, """
+            SELECT id FROM laps
+            WHERE session_id = ?
+              AND lap_time_seconds IS NOT NULL
+              AND is_accurate = 1
+              AND lap_number > 1
+            ORDER BY lap_time_seconds ASC
+            LIMIT 1
+        """, (session_id,))
 
-            # Fastest accurate non-formation lap
-            cursor.execute("""
-                SELECT id FROM laps
-                WHERE session_id = ?
-                  AND lap_time_seconds IS NOT NULL
-                  AND is_accurate = 1
-                  AND lap_number > 1
-                ORDER BY lap_time_seconds ASC
-                LIMIT 1
-            """, (session_id,))
-            row = cursor.fetchone()
+        if not lap:
+            return {"x": [], "y": [], "count": 0}
 
-            if not row:
-                return {"x": [], "y": [], "count": 0}
+        rows = db_fetchall(season, """
+            SELECT x, y FROM telemetry
+            WHERE lap_id = ?
+            ORDER BY session_time_seconds
+        """, (lap["id"],))
 
-            lap_id = row['id']
-
-            cursor.execute("""
-                SELECT x, y FROM telemetry
-                WHERE lap_id = ?
-                ORDER BY session_time_seconds
-            """, (lap_id,))
-            rows = cursor.fetchall()
-
-            return {
-                "x": [r['x'] for r in rows],
-                "y": [r['y'] for r in rows],
-                "count": len(rows)
-            }
+        return {
+            "x": [r["x"] for r in rows],
+            "y": [r["y"] for r in rows],
+            "count": len(rows),
+        }
 
     # ===== UTILITY METHODS =====
 
     @staticmethod
     def get_database_stats(season: int) -> Dict[str, Any]:
         """Get statistics for a specific season DB."""
+        # Table names are hardcoded constants — not user input.
+        _ALLOWED = {
+            "events", "sessions", "laps",
+            "telemetry", "results", "weather", "race_control_messages",
+        }
+
         with get_db_connection(season) as conn:
             cursor = conn.cursor()
 
-            def count(table, where=""):
-                q = f"SELECT COUNT(*) as c FROM {table}"
+            def count(table: str, where: str = "") -> int:
+                if table not in _ALLOWED:
+                    raise ValueError(f"Unknown table: {table}")
+                q = f"SELECT COUNT(*) as c FROM {table}"  # noqa: S608
                 if where:
                     q += f" WHERE {where}"
                 cursor.execute(q)
-                return cursor.fetchone()['c']
+                return cursor.fetchone()["c"]
 
             return {
-                'season': season,
-                'events': count('events'),
-                'sessions': count('sessions', 'has_data = 1'),
-                'laps': count('laps'),
-                'telemetry_samples': count('telemetry'),
-                'results': count('results'),
-                'weather_points': count('weather'),
-                'race_control_messages': count('race_control_messages')
+                "season": season,
+                "events": count("events"),
+                "sessions": count("sessions", "has_data = 1"),
+                "laps": count("laps"),
+                "telemetry_samples": count("telemetry"),
+                "results": count("results"),
+                "weather_points": count("weather"),
+                "race_control_messages": count("race_control_messages"),
             }

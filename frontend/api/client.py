@@ -1,198 +1,134 @@
 """
 Backend API client for frontend application.
 
-This module provides a clean interface to fetch data from the backend API.
-All data comes from the SQLite cache via the FastAPI backend.
+All data is read from the SQLite/Parquet cache via the FastAPI backend.
+The full /data/available response is cached in-process for AVAILABLE_TTL
+seconds so that cascading dropdowns only trigger one network round-trip
+per minute instead of one per callback.
 """
+import time
 from typing import List, Tuple, Optional
+
 import requests
 import pandas as pd
-from frontend.config import BACKEND_API_URL, CACHE_DIR
+
+from frontend.config import BACKEND_API_URL
 
 
-# Cache to avoid repeated error messages and redundant calls
-_backend_available_cache = {"checked": False, "available": False, "last_check": 0}
-_seasons_cache = None
-_races_cache = {}
+# ── Backend availability (checked at most every 5 s) ──────────────────
+_backend_check: dict = {"ok": False, "ts": 0.0}
 
 
 def _check_backend_available() -> bool:
-    """Check if backend is available, with caching to reduce spam."""
-    import time
-    
-    cache = _backend_available_cache
-    current_time = time.time()
-    
-    # Only check every 5 seconds
-    if cache["checked"] and (current_time - cache["last_check"]) < 5:
-        return cache["available"]
-    
+    now = time.time()
+    if now - _backend_check["ts"] < 5:
+        return _backend_check["ok"]
     try:
-        response = requests.get(f"{BACKEND_API_URL}/health", timeout=1)
-        cache["available"] = response.status_code == 200
-    except:
-        cache["available"] = False
-    
-    cache["checked"] = True
-    cache["last_check"] = current_time
-    
-    if not cache["available"]:
-        print(f"⚠️  Backend not available at {BACKEND_API_URL}")
-        print(f"   Start backend with: python main.py")
-    
-    return cache["available"]
+        r = requests.get(f"{BACKEND_API_URL}/health", timeout=1)
+        _backend_check["ok"] = r.status_code == 200
+    except Exception:
+        _backend_check["ok"] = False
+    _backend_check["ts"] = now
+    if not _backend_check["ok"]:
+        print(
+            f"⚠️  Backend not available at {BACKEND_API_URL}. "
+            "Start with: python main.py"
+        )
+    return _backend_check["ok"]
+
+
+# ── Unified available-data cache (TTL = 60 s) ─────────────────────────
+AVAILABLE_TTL = 60
+_available: dict = {"data": None, "ts": 0.0}
+
+
+def _get_available() -> dict:
+    """Return /data/available, refreshed at most every AVAILABLE_TTL s."""
+    now = time.time()
+    if (
+        _available["data"] is not None
+        and now - _available["ts"] < AVAILABLE_TTL
+    ):
+        return _available["data"]
+    if not _check_backend_available():
+        return {}
+    try:
+        r = requests.get(
+            f"{BACKEND_API_URL}/data/available", timeout=5
+        )
+        if r.status_code == 200 and r.text:
+            _available["data"] = r.json()
+            _available["ts"] = now
+            return _available["data"]
+    except Exception as e:
+        print(f"❌ Error fetching available data: {e}")
+    return _available["data"] or {}
+
+
+# ── Public helpers ─────────────────────────────────────────────────────
+
+def get_available_seasons() -> List[int]:
+    """Return seasons that exist in the cache, sorted descending."""
+    data = _get_available()
+    seasons = data.get("seasons", [])
+    if seasons:
+        print(f"✅ Found {len(seasons)} seasons: {seasons}")
+    return sorted(seasons, reverse=True)
+
+
+def get_races_for_season(season: int) -> List[str]:
+    """Return race event names for a given season."""
+    data = _get_available()
+    return data.get(str(season), {}).get("events", [])
+
+
+def get_sessions_for_event(season: int, event_name: str) -> List[str]:
+    """Return available session type codes for a season + event."""
+    data = _get_available()
+    return (
+        data
+        .get(str(season), {})
+        .get(event_name, {})
+        .get("sessions", [])
+    )
 
 
 def enable_cache(cache_dir: str = ".ff1cache") -> None:
-    """
-    Enable FastF1 local cache. Call this once at startup.
-    
-    NOTE: This is now a no-op since frontend reads from SQLite cache via backend API.
-    """
-    pass  # Frontend no longer uses FastF1 directly
-
-
-def get_available_seasons() -> List[int]:
-    """
-    Fetch available seasons from SQLite cache via backend API.
-    
-    Returns ONLY seasons that actually exist in the cache.
-    
-    Returns:
-        List[int]: List of available F1 seasons in cache
-    """
-    global _seasons_cache
-    
-    if _seasons_cache is not None:
-        return _seasons_cache
-    
-    if not _check_backend_available():
-        _seasons_cache = []
-        return _seasons_cache
-    
-    try:
-        url = f"{BACKEND_API_URL}/data/available"
-        response = requests.get(url, timeout=2)
-        
-        if response.status_code == 404 or not response.text:
-            print(f"⚠️  Cache is empty. Populate with: python scripts/populate_cache.py --season 2024")
-            _seasons_cache = []
-            return _seasons_cache
-        
-        response.raise_for_status()
-        data = response.json()
-        
-        if "seasons" in data and data["seasons"]:
-            _seasons_cache = sorted(data["seasons"], reverse=True)
-            print(f"✅ Found {len(_seasons_cache)} seasons: {_seasons_cache}")
-        else:
-            _seasons_cache = []
-        
-        return _seasons_cache
-        
-    except Exception as e:
-        print(f"❌ Error loading seasons: {e}")
-        _seasons_cache = []
-        return _seasons_cache
+    """No-op — frontend reads from backend API, not FastF1 directly."""
+    pass
 
 
 def get_track_layout(
-    season: int, event: str, session_type: str = 'R'
+    season: int, event: str, session_type: str = "R"
 ) -> dict:
-    """
-    Fetch circuit X/Y layout from fastest lap telemetry.
-    Returns {"x": [...], "y": [...], "count": N}.
-    Empty arrays if telemetry was not populated.
-    """
+    """Fetch circuit X/Y layout from the fastest-lap telemetry."""
     if not _check_backend_available():
         return {"x": [], "y": [], "count": 0}
     try:
-        response = requests.get(
+        r = requests.get(
             f"{BACKEND_API_URL}/data/track-layout",
-            params={"season": season, "event": event,
-                    "session_type": session_type},
-            timeout=10
+            params={
+                "season": season,
+                "event": event,
+                "session_type": session_type,
+            },
+            timeout=10,
         )
-        if response.status_code != 200:
-            return {"x": [], "y": [], "count": 0}
-        return response.json()
+        if r.status_code == 200:
+            return r.json()
+        return {"x": [], "y": [], "count": 0}
     except Exception as e:
         print(f"❌ Error loading track layout: {e}")
         return {"x": [], "y": [], "count": 0}
 
 
-def get_races_for_season(season: int) -> List[str]:
-    """
-    Fetch available races for a season from SQLite cache.
-
-    Returns:
-        List[str]: List of race event names in cache
-    """
-    global _races_cache
-    
-    if season in _races_cache:
-        return _races_cache[season]
-    
-    if not _check_backend_available():
-        _races_cache[season] = []
-        return []
-    
-    try:
-        url = f"{BACKEND_API_URL}/data/available"
-        response = requests.get(url, timeout=2)
-        
-        if response.status_code == 404 or not response.text:
-            _races_cache[season] = []
-            return []
-        
-        response.raise_for_status()
-        data = response.json()
-        
-        season_str = str(season)
-        if season_str in data and "events" in data[season_str]:
-            events = data[season_str]["events"]
-            _races_cache[season] = events
-            print(f"✅ Found {len(events)} races for {season}")
-            return events
-        else:
-            _races_cache[season] = []
-            return []
-        
-    except Exception as e:
-        print(f"❌ Error loading races for {season}: {e}")
-        _races_cache[season] = []
-        return []
-
-
-def get_sessions_for_event(season: int, event_name: str) -> list:
-    """Return list of available session types for a given season+event."""
-    if not _check_backend_available():
-        return []
-    try:
-        url = f"{BACKEND_API_URL}/data/available"
-        response = requests.get(url, timeout=2)
-        response.raise_for_status()
-        data = response.json()
-        season_data = data.get(str(season), {})
-        event_data = season_data.get(event_name, {})
-        return event_data.get("sessions", [])
-    except Exception:
-        return []
-
-
 def get_race_results(season: int, event_name: str) -> pd.DataFrame:
-    """
-    Load race results (position, points, team) for one event.
-
-    Returns a DataFrame with columns: driver_code, team, points, position.
-    Returns an empty DataFrame on error.
-    """
+    """Load race results (driver_code, team, points, position)."""
     if not _check_backend_available():
         return pd.DataFrame()
-
     for session_type in ("R", "Race"):
         try:
-            response = requests.get(
+            r = requests.get(
                 f"{BACKEND_API_URL}/data/session",
                 params={
                     "season": season,
@@ -203,11 +139,10 @@ def get_race_results(season: int, event_name: str) -> pd.DataFrame:
                 },
                 timeout=15,
             )
-            if response.status_code == 404:
+            if r.status_code == 404:
                 continue
-            response.raise_for_status()
-            data = response.json()
-            results = data.get("results", [])
+            r.raise_for_status()
+            results = r.json().get("results", [])
             if not results:
                 return pd.DataFrame()
             df = pd.DataFrame(results)
@@ -225,21 +160,17 @@ def load_session(
     season: int, event_name: str, session_type: str
 ) -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
     """
-    Load any session type from normalized SQLite cache.
-
-    Args:
-        season: F1 season year (e.g., 2024)
-        event_name: Event name (e.g., "Bahrain Grand Prix")
-        session_type: FastF1 session code (R, Q, FP1, FP2, FP3, S, SQ)
+    Load any session type from the normalized cache.
 
     Returns:
-        tuple: (laps_df, telemetry_df, session_data)
+        (laps_df, telemetry_df, session_meta)
     """
     if not _check_backend_available():
-        return pd.DataFrame(), pd.DataFrame(), {"error": "Backend not available"}
-
+        return pd.DataFrame(), pd.DataFrame(), {
+            "error": "Backend not available"
+        }
     try:
-        response = requests.get(
+        r = requests.get(
             f"{BACKEND_API_URL}/data/session",
             params={
                 "season": season,
@@ -248,23 +179,23 @@ def load_session(
             },
             timeout=30,
         )
-
-        if response.status_code == 404:
+        if r.status_code == 404:
             print(f"⚠️  {season} {event_name} [{session_type}] not found")
-            return pd.DataFrame(), pd.DataFrame(), {"error": "Session not found"}
-
-        if not response.text:
-            return pd.DataFrame(), pd.DataFrame(), {"error": "Empty response"}
-
-        response.raise_for_status()
-        data = response.json()
-
+            return pd.DataFrame(), pd.DataFrame(), {
+                "error": "Session not found"
+            }
+        if not r.text:
+            return pd.DataFrame(), pd.DataFrame(), {
+                "error": "Empty response"
+            }
+        r.raise_for_status()
+        data = r.json()
         if "laps" not in data:
-            return pd.DataFrame(), pd.DataFrame(), {"error": "Invalid format"}
+            return pd.DataFrame(), pd.DataFrame(), {
+                "error": "Invalid format"
+            }
 
         laps = pd.DataFrame(data["laps"])
-
-        # Normalize column names to match existing page expectations
         col_map = {
             "lap_time_seconds": "LapTimeSeconds",
             "driver_code": "Driver",
@@ -275,16 +206,15 @@ def load_session(
             if src in laps.columns:
                 laps[dst] = laps[src]
 
-        session_data = {
+        meta = {
             "season": season,
             "event_name": event_name,
             "session_type": session_type,
             "drivers": data.get("drivers", []),
             "lap_count": len(laps),
         }
-
         print(f"✅ Loaded {len(laps)} laps for {event_name} [{session_type}]")
-        return laps, pd.DataFrame(), session_data
+        return laps, pd.DataFrame(), meta
 
     except Exception as e:
         print(f"❌ Error loading session: {e}")
@@ -292,27 +222,22 @@ def load_session(
 
 
 def load_race_session(
-    season: int, event_name: str, preferred_session: Optional[str] = None
+    season: int,
+    event_name: str,
+    preferred_session: Optional[str] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
-    """
-    Load session data based on context.
-    If preferred_session is provided, try that first.
-    Default: Q for Qualify rules, R for positions.
-    """
+    """Load session data, trying preferred_session first then fallback."""
     priority = [preferred_session] if preferred_session else ["Q", "R"]
-    # If no preference, we might want to try both, but if we are in "Positions"
-    # we definitely want "R". If we are in "Qualy", we want "Q".
     for stype in priority:
-        if not stype: continue
+        if not stype:
+            continue
         laps, tel, meta = load_session(season, event_name, stype)
         if not laps.empty:
             return laps, tel, meta
-    
-    # Second pass fallback
     for stype in ["Q", "R"]:
-        if stype == preferred_session: continue
+        if stype == preferred_session:
+            continue
         laps, tel, meta = load_session(season, event_name, stype)
         if not laps.empty:
             return laps, tel, meta
-            
     return pd.DataFrame(), pd.DataFrame(), {}

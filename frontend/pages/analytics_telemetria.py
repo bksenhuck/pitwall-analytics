@@ -1,34 +1,50 @@
+"""Analytics › Telemetria — análise comparativa sincronizada."""
 import dash
 from dash import html, dcc, Input, Output, State
 import plotly.graph_objs as go
-from plotly.subplots import make_subplots
 import numpy as np
 import requests
 
 from frontend.components.navigation import create_analytics_subnav
-from frontend.components.charts import _fmt_laptime_full
 from frontend.api import client
 from frontend.f1_config import get_driver_color, get_driver_full_name
 from frontend.config import BACKEND_API_URL
+from frontend.utils import (
+    BORDER as _BORDER,
+    MUTED as _MUTED,
+    fmt_laptime_full as _fmt_laptime_full,
+    hex_to_rgba as _hex_to_rgba,
+    alert_cache_empty,
+    alert_backend_error,
+    seasons_to_options,
+)
 
-# Tema Pitwall (espelha frontend/components/charts.py)
-_BG     = "#F4F5F7"
-_BORDER = "#DDE1E7"
-_TEXT   = "#1A1A1A"
-_MUTED  = "#6B7280"
+_BG = "#F4F5F7"
+_TEXT = "#1A1A1A"
 
 dash.register_page(__name__, path="/analytics/telemetria", name="Telemetria")
 
-# Palette de contraste para pilotos do mesmo time
-_CONTRAST_PALETTE = ["#FFFFFF", "#FFD700", "#FF6B6B", "#4ECDC4", "#A29BFE", "#FD79A8"]
+_CONTRAST_PALETTE = [
+    "#FFFFFF", "#FFD700", "#FF6B6B",
+    "#4ECDC4", "#A29BFE", "#FD79A8",
+]
 _LINE_STYLES = ["solid", "dash", "dot", "dashdot", "longdash", "longdashdot"]
 
+_SESSION_LABELS = {
+    "FP1": "Treino Livre 1 (FP1)",
+    "FP2": "Treino Livre 2 (FP2)",
+    "FP3": "Treino Livre 3 (FP3)",
+    "Q": "Qualificação (Q)",
+    "Q1": "Q1",
+    "Q2": "Q2",
+    "Q3": "Q3",
+    "SQ": "Sprint Quali (SQ)",
+    "S": "Sprint (S)",
+    "R": "Corrida (R)",
+}
 
-def _hex_to_rgba(hex_color: str, alpha: float) -> str:
-    h = hex_color.lstrip('#')
-    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-    return f"rgba({r},{g},{b},{alpha})"
 
+# ── Helpers ──────────────────────────────────────────────────────
 
 def _compute_gap_all(
     dist: list,
@@ -46,26 +62,32 @@ def _compute_gap_all(
 
     ds = dist[1] - dist[0]
     valid = {d: lap_times[d] for d in selected_drivers if lap_times.get(d)}
-    ref = min(valid, key=lambda d: valid[d]) if valid else selected_drivers[0]
+    ref = (
+        min(valid, key=lambda d: valid[d]) if valid else selected_drivers[0]
+    )
 
     def time_arr(spds):
         s_ms = np.array([max(float(v), 1.0) for v in spds]) / 3.6
         return np.cumsum(ds / s_ms)
 
-    ref_t = time_arr(drivers_tele.get(ref, {}).get('Speed', [0] * len(dist)))
+    ref_t = time_arr(
+        drivers_tele.get(ref, {}).get("Speed", [0] * len(dist))
+    )
     gaps = {}
     for drv in selected_drivers:
-        spd = drivers_tele.get(drv, {}).get('Speed', [0] * len(dist))
+        spd = drivers_tele.get(drv, {}).get("Speed", [0] * len(dist))
         gaps[drv] = (time_arr(spd) - ref_t).tolist()
     return gaps, ref
 
 
-def _build_track_map(drivers_tele: dict, selected_drivers: list, colors: dict) -> go.Figure:
+def _build_track_map(
+    drivers_tele: dict, selected_drivers: list, colors: dict
+) -> go.Figure:
     """Scatter map colored by which driver is faster at each point."""
     fig = go.Figure()
     ref = selected_drivers[0]
-    x_data = drivers_tele.get(ref, {}).get('X', [])
-    y_data = drivers_tele.get(ref, {}).get('Y', [])
+    x_data = drivers_tele.get(ref, {}).get("X", [])
+    y_data = drivers_tele.get(ref, {}).get("Y", [])
 
     has_coords = bool(x_data) and not all(v == 0 for v in x_data[:20])
     if not has_coords:
@@ -77,11 +99,12 @@ def _build_track_map(drivers_tele: dict, selected_drivers: list, colors: dict) -
     else:
         if len(selected_drivers) >= 2:
             drv1, drv2 = selected_drivers[0], selected_drivers[1]
-            spd1 = drivers_tele.get(drv1, {}).get('Speed', [])
-            spd2 = drivers_tele.get(drv2, {}).get('Speed', [])
+            spd1 = drivers_tele.get(drv1, {}).get("Speed", [])
+            spd2 = drivers_tele.get(drv2, {}).get("Speed", [])
             n = min(len(x_data), len(y_data), len(spd1), len(spd2))
             point_colors = [
-                colors[drv1] if (spd1[i] or 0) >= (spd2[i] or 0) else colors[drv2]
+                colors[drv1] if (spd1[i] or 0) >= (spd2[i] or 0)
+                else colors[drv2]
                 for i in range(n)
             ]
         else:
@@ -91,10 +114,28 @@ def _build_track_map(drivers_tele: dict, selected_drivers: list, colors: dict) -
         fig.add_trace(go.Scatter(
             x=x_data[:n],
             y=y_data[:n],
-            mode='markers',
-            marker=dict(color=point_colors, size=4, symbol='circle'),
+            mode="markers",
+            marker=dict(color=point_colors, size=4, symbol="circle"),
             showlegend=False,
-            hoverinfo='skip',
+            hoverinfo="skip",
+        ))
+
+        # Start/finish marker at lap origin
+        fig.add_trace(go.Scatter(
+            x=[x_data[0]],
+            y=[y_data[0]],
+            mode="markers+text",
+            marker=dict(
+                symbol="square",
+                size=14,
+                color="#FFFFFF",
+                line=dict(color="#333333", width=2),
+            ),
+            text=["S/F"],
+            textposition="top center",
+            textfont=dict(size=9, color=_MUTED),
+            showlegend=False,
+            hoverinfo="skip",
         ))
 
     fig.update_layout(
@@ -102,10 +143,35 @@ def _build_track_map(drivers_tele: dict, selected_drivers: list, colors: dict) -
         plot_bgcolor=_BG,
         margin=dict(t=8, b=8, l=8, r=8),
         xaxis=dict(visible=False),
-        yaxis=dict(visible=False, scaleanchor='x', scaleratio=1),
+        yaxis=dict(visible=False, scaleanchor="x", scaleratio=1),
+        dragmode=False,
         height=220,
     )
     return fig
+
+
+def _compute_dominance(drivers_tele: dict, selected_drivers: list) -> dict:
+    """% of distance points where each driver has the highest speed."""
+    if not selected_drivers:
+        return {}
+    if len(selected_drivers) == 1:
+        return {selected_drivers[0]: 100.0}
+
+    speeds, n = {}, None
+    for drv in selected_drivers:
+        arr = drivers_tele.get(drv, {}).get("Speed", [])
+        speeds[drv] = np.array([float(v or 0) for v in arr])
+        n = len(arr) if n is None else min(n, len(arr))
+
+    if not n:
+        return {d: 0.0 for d in selected_drivers}
+
+    stacked = np.column_stack([speeds[d][:n] for d in selected_drivers])
+    fastest_idx = np.argmax(stacked, axis=1)
+    return {
+        d: float(np.sum(fastest_idx == i)) / n * 100
+        for i, d in enumerate(selected_drivers)
+    }
 
 
 def _assign_colors(year, driver_codes: list) -> dict:
@@ -116,14 +182,17 @@ def _assign_colors(year, driver_codes: list) -> dict:
     for drv in driver_codes:
         c = get_driver_color(year, drv)
         if c in used:
-            # Fallback to contrast palette
-            colors[drv] = _CONTRAST_PALETTE[contrast_idx % len(_CONTRAST_PALETTE)]
+            colors[drv] = _CONTRAST_PALETTE[
+                contrast_idx % len(_CONTRAST_PALETTE)
+            ]
             contrast_idx += 1
         else:
             colors[drv] = c
             used.append(c)
     return colors
 
+
+# ── Layout ───────────────────────────────────────────────────────
 
 layout = html.Div([
     html.Div([
@@ -138,7 +207,7 @@ layout = html.Div([
 
     html.Div(id="tele-warning"),
 
-    # ── Filtros ─────────────────────────────────────────────────
+    # ── Filtros ──────────────────────────────────────────────────
     html.Div([
         html.Div([
             html.Label("Temporada"),
@@ -192,11 +261,12 @@ layout = html.Div([
                 className="btn-primary",
             ),
         ], className="filter", style={"alignSelf": "flex-end"}),
-    ], className="filters", style={"display": "flex", "gap": "1rem", "flexWrap": "wrap"}),
+    ], className="filters", style={
+        "display": "flex", "gap": "1rem", "flexWrap": "wrap",
+    }),
 
     # ── Header estático: 30% pilotos | 70% mapa ─────────────────
     html.Div([
-        # A – 30%: tempos de volta (scroll interno)
         html.Div(
             html.Div(
                 id="tele-header-info",
@@ -212,31 +282,38 @@ layout = html.Div([
                 "width": "30%",
                 "height": "236px",
                 "overflowY": "auto",
-                "borderRight": "1px solid #DDE1E7",
+                "borderRight": f"1px solid {_BORDER}",
             },
         ),
-        # B – 70%: mapa da pista
         html.Div([
+            html.Div(
+                id="tele-dominance-row",
+                style={
+                    "display": "flex",
+                    "justifyContent": "center",
+                    "gap": "1.5rem",
+                    "paddingTop": "6px",
+                },
+            ),
             html.Div(
                 "Velocidade por setor — cor do piloto mais rápido",
                 style={
                     "fontSize": "0.75rem",
-                    "color": "#6B7280",
+                    "color": _MUTED,
                     "textAlign": "center",
-                    "paddingTop": "6px",
                 },
             ),
             dcc.Graph(
                 id="tele-track-map",
-                config={"displayModeBar": False},
-                style={"height": "220px"},
+                config={"displayModeBar": False, "scrollZoom": False},
+                style={"height": "200px"},
             ),
         ], style={"width": "70%"}),
     ], id="tele-header-container", style={
         "display": "none",
         "marginTop": "2rem",
         "marginBottom": "1rem",
-        "border": "1px solid #DDE1E7",
+        "border": f"1px solid {_BORDER}",
         "borderRadius": "8px",
         "backgroundColor": "#FFFFFF",
     }),
@@ -244,52 +321,30 @@ layout = html.Div([
     dcc.Loading(
         id="tele-loading",
         type="default",
-        children=dcc.Graph(
-            id="tele-h2h-graph",
-            style={"height": "1600px", "width": "100%"},
-            config={
-                "displayModeBar": True,
-                "responsive": True,
-                "scrollZoom": False,
-                "modeBarButtonsToRemove": [
-                    "zoom2d", "zoomIn2d", "zoomOut2d",
-                    "autoScale2d", "resetScale2d",
-                ],
-            }
-        ),
+        children=html.Div(id="tele-h2h-container"),
     ),
 
     dcc.Store(id="tele-page-trigger", data={"loaded": True}),
 ])
 
-# ── Callbacks ───────────────────────────────────────────────────
+
+# ── Callbacks ────────────────────────────────────────────────────
 
 @dash.callback(
     Output("tele-season-dropdown", "options"),
     Output("tele-season-dropdown", "value"),
+    Output("tele-warning", "children"),
     Input("tele-page-trigger", "data"),
 )
 def load_seasons(_):
-    seasons = [2026, 2025, 2024]
     try:
-        remote = client.get_available_seasons()
-        if remote: seasons = remote
-    except: pass
-    return [{"label": str(s), "value": s} for s in seasons], seasons[0]
-
-
-_SESSION_LABELS = {
-    "FP1": "Treino Livre 1 (FP1)",
-    "FP2": "Treino Livre 2 (FP2)",
-    "FP3": "Treino Livre 3 (FP3)",
-    "Q":   "Qualificação (Q)",
-    "Q1":  "Q1",
-    "Q2":  "Q2",
-    "Q3":  "Q3",
-    "SQ":  "Sprint Quali (SQ)",
-    "S":   "Sprint (S)",
-    "R":   "Corrida (R)",
-}
+        seasons = client.get_available_seasons()
+        if not seasons:
+            return [], None, alert_cache_empty()
+        return seasons_to_options(seasons), seasons[0], None
+    except Exception as e:
+        print(f"Error loading seasons: {e}")
+        return [], None, alert_backend_error()
 
 
 @dash.callback(
@@ -322,8 +377,7 @@ def load_sessions(season, race):
             {"label": _SESSION_LABELS.get(s, s), "value": s}
             for s in sessions
         ]
-        default = sessions[0] if sessions else None
-        return options, default
+        return options, (sessions[0] if sessions else None)
     except Exception:
         return [], None
 
@@ -343,7 +397,10 @@ def load_drivers(season, race, session_type):
         if not laps.empty:
             codes = sorted(laps["Driver"].unique().tolist())
             return [
-                {"label": f"{get_driver_full_name(d)} ({d})", "value": d}
+                {
+                    "label": f"{get_driver_full_name(d)} ({d})",
+                    "value": d,
+                }
                 for d in codes
             ], None
     except Exception:
@@ -352,17 +409,18 @@ def load_drivers(season, race, session_type):
 
 
 @dash.callback(
-    Output("tele-h2h-graph", "figure"),
+    Output("tele-h2h-container", "children"),
     Output("tele-header-info", "children"),
     Output("tele-track-map", "figure"),
     Output("tele-header-container", "style"),
-    Output("tele-warning", "children"),
+    Output("tele-warning", "children", allow_duplicate=True),
+    Output("tele-dominance-row", "children"),
     Input("tele-load-button", "n_clicks"),
     State("tele-season-dropdown", "value"),
     State("tele-race-dropdown", "value"),
     State("tele-session-type-dropdown", "value"),
     State("tele-drivers-dropdown", "value"),
-    prevent_initial_call=True
+    prevent_initial_call=True,
 )
 def update_telemetry(n_clicks, year, gp, session_type, selected_drivers):
     _hidden = {"display": "none"}
@@ -370,25 +428,27 @@ def update_telemetry(n_clicks, year, gp, session_type, selected_drivers):
         "display": "flex",
         "marginTop": "2rem",
         "marginBottom": "1rem",
-        "border": "1px solid #DDE1E7",
+        "border": f"1px solid {_BORDER}",
         "borderRadius": "8px",
         "backgroundColor": "#FFFFFF",
     }
     if not selected_drivers:
-        return go.Figure(), [], go.Figure(), _hidden, html.Div(
+        return html.Div(), [], go.Figure(), _hidden, html.Div(
             "Selecione ao menos 1 piloto para analisar.",
-            className="alert alert-warning"
-        )
+            className="alert alert-warning",
+        ), []
 
     try:
-        url = f"{BACKEND_API_URL}/data/telemetry/head-to-head"
-        params = {
-            "year": year,
-            "gp": gp,
-            "session_type": session_type,
-            "drivers": ",".join(selected_drivers),
-        }
-        res = requests.get(url, params=params, timeout=60)
+        res = requests.get(
+            f"{BACKEND_API_URL}/data/telemetry/head-to-head",
+            params={
+                "year": year,
+                "gp": gp,
+                "session_type": session_type,
+                "drivers": ",".join(selected_drivers),
+            },
+            timeout=60,
+        )
         res.raise_for_status()
         data = res.json()
 
@@ -401,141 +461,148 @@ def update_telemetry(n_clicks, year, gp, session_type, selected_drivers):
 
         colors = _assign_colors(year, selected_drivers)
 
-        fig = make_subplots(
-            rows=6, cols=1,
-            shared_xaxes=True,
-            vertical_spacing=0.025,
-            row_heights=[1.2, 1.0, 0.8, 0.5, 0.8, 0.7],
-            subplot_titles=(
-                "<b>Velocity</b> (km/h)",
-                "<b>RPM</b>",
-                "<b>Throttle</b> (%)",
-                "<b>DRS Status</b>",
-                "<b>Gears</b> (nGear)",
-                "<b>GAP</b> (s)",
-            )
+        _chart_cfg = {"displayModeBar": False, "scrollZoom": False, "staticPlot": True}
+        _legend_style = dict(
+            orientation="h",
+            yanchor="top", y=-0.08,
+            xanchor="center", x=0.5,
+            bgcolor="rgba(0,0,0,0)",
+            font=dict(color=_TEXT, size=12),
         )
-
-        plot_configs = [
-            ("Speed",    1, "Speed"),
-            ("RPM",      2, "RPM"),
-            ("Throttle", 3, "%"),
-            ("DRS",      4, "Status"),
-            ("nGear",    5, "Gear"),
-        ]
-
-        for drv_idx, drv in enumerate(selected_drivers):
-            drv_tele = drivers_tele.get(drv, {})
-            color = colors[drv]
-            line_style = _LINE_STYLES[drv_idx % len(_LINE_STYLES)]
-            full_name = get_driver_full_name(drv)
-
-            for col, row_idx, _ in plot_configs:
-                fig.add_trace(go.Scatter(
-                    x=dist,
-                    y=drv_tele.get(col, []),
-                    name=f"{full_name} ({drv})",
-                    line=dict(color=color, width=2, dash=line_style),
-                    legendgroup=drv,
-                    showlegend=(row_idx == 1),
-                    hovertemplate="%{y:.1f}",
-                ), row=row_idx, col=1)
-
-        # ── GAP trace (row 6) — ref = piloto mais rápido ─────────
-        gaps, ref_drv = _compute_gap_all(
-            dist, drivers_tele, selected_drivers, lap_times
+        _xaxis_base = dict(
+            showgrid=False, zeroline=False,
+            linecolor=_BORDER, tickfont=dict(color=_MUTED),
         )
-        for drv in selected_drivers:
-            gap = gaps[drv]
-            color = colors[drv]
-            if drv == ref_drv:
-                # Referência: linha plana em 0
-                fig.add_trace(go.Scatter(
-                    x=dist, y=gap,
-                    line=dict(color=color, width=1.5, dash='dot'),
-                    showlegend=False,
-                    hovertemplate=f"{drv}: 0.000s",
-                    name=drv,
-                ), row=6, col=1)
-            else:
-                fig.add_trace(go.Scatter(
-                    x=dist, y=gap,
-                    fill='tozeroy',
-                    fillcolor=_hex_to_rgba(color, 0.2),
-                    line=dict(color=color, width=1.5),
-                    showlegend=False,
-                    hovertemplate=f"{drv}: +%{{y:.3f}}s",
-                    name=drv,
-                ), row=6, col=1)
-        fig.add_hline(y=0, line=dict(color=_BORDER, width=1), row=6, col=1)
-
-        # Atualiza título do GAP com o piloto de referência
-        ref_name = get_driver_full_name(ref_drv)
-        fig.layout.annotations[5].update(
-            text=f"<b>GAP</b> vs {ref_name} ({ref_drv}) (s)"
-        )
-
-        fig.update_yaxes(
-            title_text="<b>s</b>",
-            title_font=dict(color=_TEXT, size=14),
-            row=6, col=1,
+        _yaxis_base = dict(
             showgrid=False, zeroline=False,
             linecolor=_BORDER,
             tickfont=dict(color=_MUTED, size=12),
+            title_font=dict(color=_TEXT, size=13),
         )
-        for _, subplot_row, y_label in plot_configs:
-            fig.update_yaxes(
-                title_text=f"<b>{y_label}</b>",
-                title_font=dict(color=_TEXT, size=14),
-                row=subplot_row, col=1,
-                showgrid=False, zeroline=False,
-                linecolor=_BORDER,
-                tickfont=dict(color=_MUTED, size=12),
-            )
+        _title_style = {
+            "fontSize": "0.95rem",
+            "fontWeight": "700",
+            "color": _TEXT,
+            "textAlign": "center",
+            "marginBottom": "0.25rem",
+        }
+
+        channels = [
+            ("Speed",    "Velocity (km/h)", "km/h"),
+            ("RPM",      "RPM",             "RPM"),
+            ("Throttle", "Throttle (%)",    "%"),
+            ("DRS",      "DRS Status",      "Status"),
+            ("nGear",    "Gears (nGear)",   "Gear"),
+        ]
+
+        graphs = []
+        for ch_idx, (col, title, y_label) in enumerate(channels):
+            ch_fig = go.Figure()
+            for drv_idx, drv in enumerate(selected_drivers):
+                drv_tele = drivers_tele.get(drv, {})
+                color = colors[drv]
+                line_style = _LINE_STYLES[drv_idx % len(_LINE_STYLES)]
+                full_name = get_driver_full_name(drv)
+                ch_fig.add_trace(go.Scatter(
+                    x=dist, y=drv_tele.get(col, []),
+                    name=f"{full_name} ({drv})",
+                    line=dict(color=color, width=2, dash=line_style),
+                    hovertemplate="%{y:.1f}",
+                ))
             for corner in corners:
-                fig.add_vline(
+                ch_fig.add_vline(
                     x=corner["Distance"],
                     line=dict(color=_BORDER, width=1, dash="dot"),
-                    row=subplot_row, col=1,
                 )
-                if subplot_row == 1:
-                    fig.add_annotation(
-                        x=corner["Distance"], y=1.1, yref="paper",
+                if ch_idx == 0:
+                    ch_fig.add_annotation(
+                        x=corner["Distance"], y=0.98, yref="paper",
                         text=f"C{corner['Number']}", showarrow=False,
-                        font=dict(color=_MUTED, size=9),
-                        row=1, col=1,
+                        font=dict(color=_MUTED, size=9), yanchor="top",
                     )
+            ch_fig.update_layout(
+                paper_bgcolor=_BG, plot_bgcolor=_BG,
+                showlegend=True,
+                font=dict(
+                    color=_TEXT,
+                    family="Inter, Arial, sans-serif",
+                    size=12,
+                ),
+                height=300,
+                margin=dict(t=10, b=70, l=80, r=40),
+                hovermode="x unified",
+                legend=_legend_style,
+                xaxis=dict(**_xaxis_base, showticklabels=False),
+                yaxis=dict(**_yaxis_base, title_text=f"<b>{y_label}</b>"),
+            )
+            graphs.append(html.Div([
+                html.Div(title, style=_title_style),
+                dcc.Graph(figure=ch_fig, config=_chart_cfg),
+            ], style={"marginBottom": "2rem"}))
 
-        fig.update_layout(
-            paper_bgcolor=_BG,
-            plot_bgcolor=_BG,
-            font=dict(color=_TEXT, family="Inter, Arial, sans-serif", size=12),
-            title=dict(text=""), # Removido título nativo (linha de texto)
-            height=1600,
-            # Margem superior aumentada para dar mais espaço à legenda
-            margin=dict(t=150, b=60, l=80, r=40),
-            hovermode="x unified",
-            # Legenda centralizada e mais distante do gráfico (y subiu)
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.05,
-                xanchor="center",
-                x=0.5,
-                bgcolor="rgba(0,0,0,0)",
-                font=dict(color=_TEXT),
+        # ── GAP chart ──────────────────────────────────────────────
+        gaps, ref_drv = _compute_gap_all(
+            dist, drivers_tele, selected_drivers, lap_times
+        )
+        ref_name = get_driver_full_name(ref_drv)
+        gap_fig = go.Figure()
+        for drv_idx, drv in enumerate(selected_drivers):
+            gap = gaps[drv]
+            color = colors[drv]
+            line_style = _LINE_STYLES[drv_idx % len(_LINE_STYLES)]
+            full_name = get_driver_full_name(drv)
+            if drv == ref_drv:
+                gap_fig.add_trace(go.Scatter(
+                    x=dist, y=gap,
+                    name=f"{full_name} ({drv})",
+                    line=dict(color=color, width=1.5, dash="dot"),
+                    hovertemplate=f"{drv}: 0.000s",
+                ))
+            else:
+                gap_fig.add_trace(go.Scatter(
+                    x=dist, y=gap,
+                    fill="tozeroy",
+                    fillcolor=_hex_to_rgba(color, 0.2),
+                    name=f"{full_name} ({drv})",
+                    line=dict(color=color, width=1.5, dash=line_style),
+                    hovertemplate=f"{drv}: +%{{y:.3f}}s",
+                ))
+        gap_fig.add_hline(y=0, line=dict(color=_BORDER, width=1))
+        for corner in corners:
+            gap_fig.add_vline(
+                x=corner["Distance"],
+                line=dict(color=_BORDER, width=1, dash="dot"),
+            )
+        gap_fig.update_layout(
+            paper_bgcolor=_BG, plot_bgcolor=_BG,
+            showlegend=True,
+            font=dict(
+                color=_TEXT,
+                family="Inter, Arial, sans-serif",
+                size=12,
             ),
+            height=300,
+            margin=dict(t=10, b=100, l=80, r=40),
+            hovermode="x unified",
+            legend=_legend_style,
+            xaxis=dict(**_xaxis_base, title_text="Distância (m)"),
+            yaxis=dict(**_yaxis_base, title_text="<b>s</b>"),
         )
-        fig.update_xaxes(
-            title_text="Distância (m)", row=6, col=1,
-            showgrid=False, zeroline=False, linecolor=_BORDER,
-            tickfont=dict(color=_MUTED),
+        gap_title = f"GAP vs {ref_name} ({ref_drv}) (s)"
+        graphs.append(html.Div([
+            html.Div(gap_title, style=_title_style),
+            dcc.Graph(figure=gap_fig, config=_chart_cfg),
+        ]))
+
+        charts_div = html.Div(graphs, style={"marginTop": "1.5rem"})
+
+        track_map_fig = _build_track_map(
+            drivers_tele, selected_drivers, colors
         )
 
-        # ── Track map ────────────────────────────────────────────
-        track_map_fig = _build_track_map(drivers_tele, selected_drivers, colors)
+        dominance = _compute_dominance(drivers_tele, selected_drivers)
 
-        # ── Pilot cards ──────────────────────────────────────────
+        # Esquerda: cards originais (piloto + tempo)
         pilot_cards = [
             html.Div([
                 html.Div(
@@ -554,10 +621,30 @@ def update_telemetry(n_clicks, year, gp, session_type, selected_drivers):
             for drv in selected_drivers
         ]
 
-        return fig, pilot_cards, track_map_fig, _visible, None
+        # Direita: big numbers de dominância acima do mapa
+        dominance_items = [
+            html.Div([
+                html.Div(
+                    f"{dominance.get(drv, 0):.1f}%",
+                    style={
+                        "color": colors[drv],
+                        "fontWeight": "700",
+                        "fontSize": "1.4rem",
+                        "lineHeight": "1",
+                    },
+                ),
+                html.Div(
+                    drv,
+                    style={"fontSize": "0.65rem", "color": _MUTED},
+                ),
+            ], style={"textAlign": "center"})
+            for drv in selected_drivers
+        ]
+
+        return charts_div, pilot_cards, track_map_fig, _visible, None, dominance_items
 
     except Exception as e:
-        return go.Figure(), [], go.Figure(), _hidden, html.Div(
-            f"Erro na análise de telemetria: {str(e)}",
-            className="alert alert-error"
-        )
+        return html.Div(), [], go.Figure(), _hidden, html.Div(
+            f"Erro na análise de telemetria: {e}",
+            className="alert alert-error",
+        ), []

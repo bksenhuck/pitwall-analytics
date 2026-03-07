@@ -47,7 +47,7 @@ class TelemetryService:
         tele_data: Dict[str, pd.DataFrame] = {}
 
         for drv in drivers:
-            laps = self.repo.get_laps_for_session(year, session['id'], drv)
+            laps = self.repo.get_laps_for_session(year, session['id'], driver_filter=drv)
             valid_laps = [l for l in laps if l.get('lap_time_seconds')]
             if not valid_laps:
                 raise ValueError(f"Nenhuma volta válida encontrada para {drv}")

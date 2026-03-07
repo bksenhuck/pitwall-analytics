@@ -24,15 +24,20 @@ async def get_telemetry_h2h(
     drivers: str = Query(..., description="Comma-separated driver codes"),
 ) -> Dict[str, Any]:
     """Get synchronized telemetry for N drivers on a common distance axis."""
+    print(f"\n🚀 API ENDPOINT CHAMADO: /data/telemetry/head-to-head")
+    print(f"   year={year}, gp={gp}, session_type={session_type}, drivers={drivers}\n")
+    
     driver_list = [d.strip().upper() for d in drivers.split(",") if d.strip()]
     
     logger.info(f"🚀 API Request: year={year}, gp={gp}, session_type={session_type}, drivers={driver_list}")
     
     if not driver_list:
+        print(f"❌ Nenhum piloto fornecido")
         logger.error(f"❌ Nenhum piloto fornecido")
         raise HTTPException(status_code=400, detail="At least 1 driver code required")
     
     try:
+        print(f"📡 Chamando TelemetryService.get_head_to_head_telemetry()...")
         logger.info(f"📡 Chamando TelemetryService...")
         result = telemetry_service.get_head_to_head_telemetry(
             year=year,
@@ -40,16 +45,23 @@ async def get_telemetry_h2h(
             session_type=session_type,
             drivers=driver_list,
         )
+        print(f"✅ TelemetryService retornou com sucesso")
         logger.info(f"✅ Telemetria obtida com sucesso")
         return result
         
     except ValueError as e:
+        print(f"⚠️  ValueError: {str(e)}")
         logger.warning(f"⚠️  ValueError: {str(e)}")
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         import traceback
-        logger.exception(f"❌ ERRO CRÍTICO: {str(e)}")
+        print(f"\n{'='*80}")
+        print(f"❌ ERRO NO ENDPOINT /data/telemetry/head-to-head:")
+        print(f"   {type(e).__name__}: {str(e)}")
+        print(f"   Traceback:")
         traceback.print_exc()
+        print(f"{'='*80}\n")
+        logger.exception(f"❌ ERRO CRÍTICO: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Telemetry error: {str(e)}")
 
 

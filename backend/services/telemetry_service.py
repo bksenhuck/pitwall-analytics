@@ -28,22 +28,32 @@ class TelemetryService:
         Fetches and aligns telemetry for N drivers' best laps from cache.
         All drivers are interpolated onto a common distance axis.
         """
+        print(f"\n{'='*80}")
+        print(f"🔍 INICIANDO TELEMETRIA: {year} {gp} {session_type} drivers={drivers}")
+        print(f"{'='*80}\n")
         logger.info(f"🔍 Iniciando telemetria: {year} {gp} {session_type} drivers={drivers}")
         
-        # 1. Resolver evento e sessão
-        logger.info(f"📍 Procurando evento: {gp}")
-        event = self.repo.get_event_by_name(year, gp)
-        if not event:
-            logger.error(f"❌ Evento não encontrado: {gp} {year}")
-            raise ValueError(f"Evento {gp} não encontrado para {year}")
-        logger.info(f"✅ Evento encontrado: {event['name']} (ID: {event['id']})")
+        try:
+            # 1. Resolver evento e sessão
+            print(f"📍 Procurando evento: {gp}")
+            logger.info(f"📍 Procurando evento: {gp}")
+            event = self.repo.get_event_by_name(year, gp)
+            if not event:
+                print(f"❌ Evento não encontrado: {gp} {year}")
+                logger.error(f"❌ Evento não encontrado: {gp} {year}")
+                raise ValueError(f"Evento {gp} não encontrado para {year}")
+            print(f"✅ Evento encontrado: {event['name']} (ID: {event['id']})")
+            logger.info(f"✅ Evento encontrado: {event['name']} (ID: {event['id']})")
 
-        logger.info(f"🔎 Procurando sessão: {session_type}")
-        session = self.repo.get_session(year, event['id'], session_type)
-        if not session:
-            logger.error(f"❌ Sessão não encontrada: {session_type}")
-            raise ValueError(f"Sessão {session_type} não encontrada")
-        logger.info(f"✅ Sessão encontrada: {session['name']} (ID: {session['id']})")
+            print(f"🔎 Procurando sessão: {session_type}")
+            logger.info(f"🔎 Procurando sessão: {session_type}")
+            session = self.repo.get_session(year, event['id'], session_type)
+            if not session:
+                print(f"❌ Sessão não encontrada: {session_type}")
+                logger.error(f"❌ Sessão não encontrada: {session_type}")
+                raise ValueError(f"Sessão {session_type} não encontrada")
+            print(f"✅ Sessão encontrada: {session['name']} (ID: {session['id']})")
+            logger.info(f"✅ Sessão encontrada: {session['name']} (ID: {session['id']})")
 
         # 2. Buscar melhor volta de cada piloto
         rename_map = {
@@ -209,6 +219,7 @@ class TelemetryService:
             logger.info(f"   {drv}: Delta range [{delta_min:.3f}s - {delta_max:.3f}s]")
 
         logger.info(f"✅ Telemetria completa! Retornando resultado...")
+        print(f"\n✅ SUCESSO! Resultado retornado\n")
         return {
             'metadata': {
                 'year': year,
@@ -226,3 +237,11 @@ class TelemetryService:
             },
             'corners': [],
         }
+        
+        except Exception as e:
+            print(f"\n{'='*80}")
+            print(f"❌ ERRO CRÍTICO NA TELEMETRIA:")
+            print(f"{type(e).__name__}: {str(e)}")
+            print(f"{'='*80}\n")
+            logger.exception(f"❌ ERRO CRÍTICO: {str(e)}")
+            raise

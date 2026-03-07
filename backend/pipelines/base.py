@@ -71,8 +71,8 @@ class BasePipeline:
         with get_db_connection(season) as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id FROM events WHERE season = ? AND round_number = ?",
-                (season, round_number),
+                "SELECT id FROM events WHERE season = ? AND event_name = ?",
+                (season, event_name),
             )
             existing = cursor.fetchone()
 
@@ -81,32 +81,57 @@ class BasePipeline:
                 cursor.execute(
                     """
                     UPDATE events
-                    SET event_name = ?, location = ?, country = ?,
+                    SET round_number = ?, location = ?, country = ?,
                         event_date = ?, event_format = ?,
                         last_updated = CURRENT_TIMESTAMP
                     WHERE id = ?
                     """,
-                    (event_name, location, country, event_date, event_format, event_id),
+                    (round_number, location, country, event_date, event_format, event_id),
                 )
             else:
-                cursor.execute(
-                    """
-                    INSERT INTO events
-                    (season, round_number, event_name, location, country,
-                     event_date, event_format)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        season,
-                        round_number,
-                        event_name,
-                        location,
-                        country,
-                        event_date,
-                        event_format,
-                    ),
-                )
-                event_id = cursor.lastrowid
+                try:
+                    cursor.execute(
+                        """
+                        INSERT INTO events
+                        (season, round_number, event_name, location, country,
+                         event_date, event_format)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            season,
+                            round_number,
+                            event_name,
+                            location,
+                            country,
+                            event_date,
+                            event_format,
+                        ),
+                    )
+                    event_id = cursor.lastrowid
+                except Exception as e:
+                    print(f"⚠️  Erro ao inserir evento {season} {event_name}: {e}, usando IGNORE")
+                    cursor.execute(
+                        """
+                        INSERT OR IGNORE INTO events
+                        (season, round_number, event_name, location, country,
+                         event_date, event_format)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            season,
+                            round_number,
+                            event_name,
+                            location,
+                            country,
+                            event_date,
+                            event_format,
+                        ),
+                    )
+                    cursor.execute(
+                        "SELECT id FROM events WHERE season = ? AND event_name = ?",
+                        (season, event_name),
+                    )
+                    event_id = cursor.fetchone()["id"]
 
             conn.commit()
             return event_id

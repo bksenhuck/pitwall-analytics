@@ -54,7 +54,7 @@ class TelemetryService:
 
             best_lap = min(valid_laps, key=lambda x: x['lap_time_seconds'])
             df = self.repo.get_telemetry_for_lap(year, best_lap['id'], session_id=best_lap.get('session_id'))
-            if df is None:
+            if df is None or not df:
                 raise ValueError(f"Telemetria não encontrada para {drv}")
 
             df = pd.DataFrame(df)
@@ -67,8 +67,17 @@ class TelemetryService:
                 df['Distance'] = df['distance']
             else:
                 # Fallback calculation (m/s * dt)
-                dt = df['session_time_seconds'].diff().fillna(0)
-                df['Distance'] = (df['speed'] / 3.6 * dt).cumsum()
+                if 'session_time_seconds' in df.columns:
+                    dt = df['session_time_seconds'].diff().fillna(0)
+                elif 'time' in df.columns:
+                    dt = df['time'].diff().fillna(0)
+                else:
+                    dt = 0.1  # Default time step
+                
+                if 'speed' in df.columns:
+                    df['Distance'] = (df['speed'] / 3.6 * dt).cumsum()
+                else:
+                    df['Distance'] = 0  # No speed data, use zero distance
 
             df = df.rename(columns=rename_map)
 
@@ -82,7 +91,10 @@ class TelemetryService:
         
         # Eixo de distância comum: usamos a distância da volta de referência
         # (geralmente a melhor volta do primeiro piloto selecionado)
-        distance_points = np.linspace(0, ref_tele['Distance'].max(), 1000)
+        max_dist = ref_tele['Distance'].max() if 'Distance' in ref_tele.columns else 100
+        if max_dist <= 0:
+            max_dist = 100  # Default fallback
+        distance_points = np.linspace(0, max_dist, 1000)
 
         def interpolate_driver(df: pd.DataFrame) -> Dict[str, list]:
             result = {}
@@ -98,7 +110,10 @@ class TelemetryService:
             # Calculo do Tempo Acumulado para o Delta
             # time = distance / speed
             # Evitar divisão por zero
-            speed_ms = np.maximum(df['Speed'] / 3.6, 0.1)
+            if 'Speed' in df.columns:
+                speed_ms = np.maximum(df['Speed'] / 3.6, 0.1)
+            else:
+                speed_ms = 0.1
             # Interpola o tempo acumulado na distância comum
             # Primeiro calculamos o tempo acumulado no DF original
             if 'session_time_seconds' in df.columns:

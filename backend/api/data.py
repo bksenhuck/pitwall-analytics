@@ -5,8 +5,11 @@ Reads exclusively from SQLite cache populated by populate_cache.py.
 """
 from fastapi import APIRouter, HTTPException, Query
 from typing import Dict, Any, Optional
+import logging
 from backend.services.f1_data_service import F1DataService
 from backend.services.telemetry_service import TelemetryService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 f1_service = F1DataService()
@@ -22,19 +25,30 @@ async def get_telemetry_h2h(
 ) -> Dict[str, Any]:
     """Get synchronized telemetry for N drivers on a common distance axis."""
     driver_list = [d.strip().upper() for d in drivers.split(",") if d.strip()]
+    
+    logger.info(f"🚀 API Request: year={year}, gp={gp}, session_type={session_type}, drivers={driver_list}")
+    
     if not driver_list:
+        logger.error(f"❌ Nenhum piloto fornecido")
         raise HTTPException(status_code=400, detail="At least 1 driver code required")
+    
     try:
-        return telemetry_service.get_head_to_head_telemetry(
+        logger.info(f"📡 Chamando TelemetryService...")
+        result = telemetry_service.get_head_to_head_telemetry(
             year=year,
             gp=gp,
             session_type=session_type,
             drivers=driver_list,
         )
+        logger.info(f"✅ Telemetria obtida com sucesso")
+        return result
+        
     except ValueError as e:
+        logger.warning(f"⚠️  ValueError: {str(e)}")
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         import traceback
+        logger.exception(f"❌ ERRO CRÍTICO: {str(e)}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Telemetry error: {str(e)}")
 

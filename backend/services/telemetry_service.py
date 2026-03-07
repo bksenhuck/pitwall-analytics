@@ -77,7 +77,8 @@ class TelemetryService:
                 if 'speed' in df.columns:
                     df['Distance'] = (df['speed'] / 3.6 * dt).cumsum()
                 else:
-                    df['Distance'] = 0  # No speed data, use zero distance
+                    # No speed data, use index-based distance
+                    df['Distance'] = np.arange(len(df))
 
             df = df.rename(columns=rename_map)
 
@@ -103,7 +104,10 @@ class TelemetryService:
             for col in cols_to_interp:
                 if col in df.columns:
                     # Garantir que interpolamos contra a distância prorpia do DF
-                    result[col] = np.interp(distance_points, df['Distance'], df[col]).tolist()
+                    try:
+                        result[col] = np.interp(distance_points, df['Distance'], df[col]).tolist()
+                    except Exception:
+                        result[col] = [0] * len(distance_points)
                 else:
                     result[col] = [0] * len(distance_points)
                     
@@ -118,9 +122,12 @@ class TelemetryService:
             # Primeiro calculamos o tempo acumulado no DF original
             if 'session_time_seconds' in df.columns:
                 # Usamos o tempo da sessão relativo ao início da volta
-                lap_start_time = df['session_time_seconds'].iloc[0]
-                accum_time = df['session_time_seconds'] - lap_start_time
-                result['AccumTime'] = np.interp(distance_points, df['Distance'], accum_time).tolist()
+                try:
+                    lap_start_time = df['session_time_seconds'].iloc[0]
+                    accum_time = df['session_time_seconds'] - lap_start_time
+                    result['AccumTime'] = np.interp(distance_points, df['Distance'], accum_time).tolist()
+                except Exception:
+                    result['AccumTime'] = [0] * len(distance_points)
             else:
                 # Fallback se não tiver tempo de sessão: calcula por dist/speed
                 # (menos preciso que o tempo real do sensor)

@@ -6,7 +6,7 @@ Reads exclusively from SQLite cache populated by populate_cache.py.
 import logging
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from typing import Dict, Any, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from backend.services.f1_data_service import F1DataService
 from backend.services.telemetry_service import TelemetryService
@@ -84,7 +84,7 @@ async def get_database_stats(
 
 @router.get('/data/seasons')
 @limiter.limit(RATE_LIMIT_LIGHT)
-async def get_seasons(request: Request) -> Dict[str, Any]:
+async def get_seasons(request: Request) -> Union[List[int], Dict[str, Any]]:
     """Available F1 seasons from cache."""
     try:
         return f1_service.get_available_seasons()
@@ -118,7 +118,7 @@ async def get_season_info(request: Request, season: int) -> Dict[str, Any]:
 
 @router.get('/data/races/{season}')
 @limiter.limit(RATE_LIMIT_LIGHT)
-async def get_races(request: Request, season: int) -> Dict[str, Any]:
+async def get_races(request: Request, season: int) -> Any:
     """Races for a specific season."""
     try:
         return f1_service.get_races_for_season(season)

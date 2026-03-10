@@ -54,8 +54,10 @@ def deploy(tag: str = "latest") -> bool:
     # GCS_SEASONS usa ":" como separador (ex: "2024:2025") para evitar
     # conflito com a virgula que o gcloud usa em --set-env-vars
     gcs_seasons = os.getenv("GCS_SEASONS", "2024:2025")
+    cloudrun_port = os.getenv("CLOUDRUN_PORT", "8080")
     cors_origins = os.getenv(
-        "CORS_ALLOW_ORIGINS", "https://pitwall-analytics-zgu3ynokvq-uc.a.run.app"
+        "CORS_ALLOW_ORIGINS",
+        f"https://pitwall-analytics-896110616616.us-central1.run.app",
     )
     env_vars = ",".join([
         f"GCS_BUCKET_NAME={GCS_BUCKET_NAME}",
@@ -63,6 +65,8 @@ def deploy(tag: str = "latest") -> bool:
         f"GCS_SEASONS={gcs_seasons}",
         f"CORS_ALLOW_ORIGINS={cors_origins}",
         "ENABLE_API_DOCS=false",
+        # Dash frontend chama a API pelo mesmo processo — porta Cloud Run
+        f"BACKEND_API_URL=http://127.0.0.1:{cloudrun_port}/api",
     ])
     cmd = [
         "gcloud", "run", "deploy", CLOUDRUN_SERVICE,
@@ -74,6 +78,7 @@ def deploy(tag: str = "latest") -> bool:
         "--memory=4Gi",
         "--cpu=2",
         "--timeout=300s",
+        "--min-instances=1",  # evita scale-to-zero interromper o download GCS
     ]
     print(f"[DEPLOY] Executando: {' '.join(cmd)}")
     result = subprocess.run(cmd, shell=True)

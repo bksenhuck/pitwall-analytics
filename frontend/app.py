@@ -50,7 +50,9 @@ def create_app():
                 dash.dcc.Link(
                     "Analytics", href="/analytics", className="nav-link"
                 ),
-                dash.dcc.Link("Live", href="/live", className="nav-link"),
+                dash.dcc.Link(
+                    "Predictions", href="/predictions", className="nav-link"
+                ),
                 dash.dcc.Link("Sobre", href="/about", className="nav-link"),
             ], className="nav"),
         ], className="header"),

@@ -71,6 +71,7 @@ assets/*-cache.*
 
 # Jupyter
 .ipynb_checkpoints
+/notebooks
 
 # pytest
 .pytest_cache/

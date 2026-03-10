@@ -6,7 +6,7 @@ def create_header(active_page: str = None):
     nav_links = [
         {"label": "Home", "href": "/"},
         {"label": "Analytics", "href": "/analytics"},
-        {"label": "Live", "href": "/live"},
+        {"label": "Predictions", "href": "/predictions"},
     ]
     nav_items = []
     for link in nav_links:
@@ -18,6 +18,7 @@ def create_header(active_page: str = None):
         html.Div("🏁 Pitwall Analytics", className="brand"),
         html.Nav(nav_items, className="nav"),
     ], className="header")
+
 
 
 def create_analytics_subnav(active_path: str = None):

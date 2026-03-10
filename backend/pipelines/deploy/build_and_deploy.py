@@ -55,10 +55,7 @@ def deploy(tag: str = "latest") -> bool:
     # conflito com a virgula que o gcloud usa em --set-env-vars
     gcs_seasons = os.getenv("GCS_SEASONS", "2024:2025")
     cloudrun_port = os.getenv("CLOUDRUN_PORT", "8080")
-    cors_origins = os.getenv(
-        "CORS_ALLOW_ORIGINS",
-        f"https://pitwall-analytics-896110616616.us-central1.run.app",
-    )
+    cors_origins = os.getenv("CORS_ALLOW_ORIGINS", "")
     env_vars = ",".join([
         f"GCS_BUCKET_NAME={GCS_BUCKET_NAME}",
         f"GCS_DB_BLOB_PATH={GCS_DB_BLOB_PATH}",

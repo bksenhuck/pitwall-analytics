@@ -78,3 +78,12 @@ assets/*-cache.*
 
 # mypy
 .mypy_cache/
+
+# Claude Code settings (may contain project IDs, emails, allowed commands)
+.claude/
+
+# Service account keys and certificates
+service-account*.json
+*-service-account.json
+*.pem
+*.key

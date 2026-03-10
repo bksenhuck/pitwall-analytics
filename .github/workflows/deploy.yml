@@ -49,10 +49,12 @@ jobs:
           region: ${{ env.GCP_REGION }}
           flags: >-
             --allow-unauthenticated
-            --memory=4Gi
-            --cpu=2
+            --memory=8Gi
+            --cpu=4
             --timeout=300s
             --min-instances=1
+            --ephemeral-storage=32Gi
+            --startup-cpu-boost
           env_vars: |
             GCS_BUCKET_NAME=${{ secrets.GCS_BUCKET_NAME }}
             GCS_DB_BLOB_PATH=${{ secrets.GCS_DB_BLOB_PATH }}

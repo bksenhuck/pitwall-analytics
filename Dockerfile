@@ -30,17 +30,16 @@ COPY backend /app/backend
 COPY frontend /app/frontend
 COPY assets /app/assets
 COPY main.py /app/main.py
-
-# Note: SQLite DB is NOT baked into the image.
-# At startup, the app downloads it from GCS via gcs_service if GCS_BUCKET_NAME is set.
+COPY startup.sh /app/startup.sh
 
 # --- Environment ---
 ENV PORT=8080 PYTHONUNBUFFERED=1
 
 RUN useradd --create-home appuser \
-    && chown -R appuser /app
+    && chown -R appuser /app \
+    && chmod +x /app/startup.sh
 USER appuser
 
 EXPOSE 8080
 
-CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "-w", "1", "-b", "0.0.0.0:8080", "--timeout", "120", "main:app"]
+CMD ["/app/startup.sh"]

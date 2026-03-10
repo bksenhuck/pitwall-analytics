@@ -10,7 +10,6 @@ Arquitetura:
 - No startup: baixa os bancos SQLite do GCS se GCS_BUCKET_NAME estiver definido
 """
 import os
-import asyncio
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -88,18 +87,14 @@ def create_production_app() -> FastAPI:
     app.include_router(data_router, prefix="/api", tags=["Data"])
 
     # ------------------------------------------------------------------
-    # 5. Startup: inicializar cache FastF1 + baixar DBs do GCS
-    # O download roda em background para nao bloquear o startup do uvicorn
-    # e evitar timeouts do Cloud Run durante o health check inicial.
+    # 5. Startup: inicializar cache FastF1
+    # O download do GCS e feito pelo startup.sh antes do gunicorn iniciar.
     # ------------------------------------------------------------------
     @app.on_event("startup")
     async def startup_event():
         from backend.services.cache_service import init_cache
         init_cache(config.CACHE_DIR, config.CACHE_ENABLED)
         print("FastF1 cache inicializado")
-
-        loop = asyncio.get_event_loop()
-        loop.run_in_executor(None, _download_dbs_from_gcs)
 
     # ------------------------------------------------------------------
     # 3. Dash app montado dentro do FastAPI

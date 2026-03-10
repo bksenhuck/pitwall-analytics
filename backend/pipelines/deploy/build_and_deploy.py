@@ -54,10 +54,15 @@ def deploy(tag: str = "latest") -> bool:
     # GCS_SEASONS usa ":" como separador (ex: "2024:2025") para evitar
     # conflito com a virgula que o gcloud usa em --set-env-vars
     gcs_seasons = os.getenv("GCS_SEASONS", "2024:2025")
+    cors_origins = os.getenv(
+        "CORS_ALLOW_ORIGINS", "https://pitwall-analytics-zgu3ynokvq-uc.a.run.app"
+    )
     env_vars = ",".join([
         f"GCS_BUCKET_NAME={GCS_BUCKET_NAME}",
         f"GCS_DB_BLOB_PATH={GCS_DB_BLOB_PATH}",
         f"GCS_SEASONS={gcs_seasons}",
+        f"CORS_ALLOW_ORIGINS={cors_origins}",
+        "ENABLE_API_DOCS=false",
     ])
     cmd = [
         "gcloud", "run", "deploy", CLOUDRUN_SERVICE,

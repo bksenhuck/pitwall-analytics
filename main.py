@@ -83,16 +83,14 @@ def create_production_app() -> FastAPI:
 
     from backend.api.health import router as health_router
     from backend.api.data import router as data_router
-    from backend.routes.data import router as cached_data_router
 
     app.include_router(health_router, prefix="/api", tags=["Health"])
     app.include_router(data_router, prefix="/api", tags=["Data"])
-    app.include_router(
-        cached_data_router, prefix="/api/cached", tags=["Cached Data"]
-    )
 
     # ------------------------------------------------------------------
-    # 2. Startup: inicializar cache FastF1 + baixar DBs do GCS
+    # 5. Startup: inicializar cache FastF1 + baixar DBs do GCS
+    # O download roda em background para nao bloquear o startup do uvicorn
+    # e evitar timeouts do Cloud Run durante o health check inicial.
     # ------------------------------------------------------------------
     @app.on_event("startup")
     async def startup_event():
@@ -101,7 +99,7 @@ def create_production_app() -> FastAPI:
         print("FastF1 cache inicializado")
 
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, _download_dbs_from_gcs)
+        loop.run_in_executor(None, _download_dbs_from_gcs)
 
     # ------------------------------------------------------------------
     # 3. Dash app montado dentro do FastAPI

@@ -37,6 +37,7 @@ ENV PORT=8080 PYTHONUNBUFFERED=1
 
 RUN useradd --create-home appuser \
     && chown -R appuser /app \
+    && sed -i 's/\r//' /app/startup.sh \
     && chmod +x /app/startup.sh
 USER appuser
 

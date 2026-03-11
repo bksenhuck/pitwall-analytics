@@ -35,6 +35,7 @@ TEAM_CONFIG: dict = {
             "Ferrari", "Scuderia Ferrari", "Scuderia Ferrari HP",
         ],
         "cars": {
+            2025: "/assets/static/images/2025/cars_drawing/ferrari.png",
             2026: "/assets/static/images/2026/cars_drawing/ferrari.png",
         },
         "logos": {},
@@ -54,6 +55,7 @@ TEAM_CONFIG: dict = {
             "Red Bull Racing", "Red Bull", "Oracle Red Bull Racing",
         ],
         "cars": {
+            2025: "/assets/static/images/2025/cars_drawing/redbull.png",
             2026: "/assets/static/images/2026/cars_drawing/redbull.png",
         },
         "logos": {},
@@ -73,6 +75,7 @@ TEAM_CONFIG: dict = {
             "McLaren", "McLaren F1 Team",
         ],
         "cars": {
+            2025: "/assets/static/images/2025/cars_drawing/mclaren.png",
             2026: "/assets/static/images/2026/cars_drawing/mclaren.png",
         },
         "logos": {},
@@ -93,6 +96,7 @@ TEAM_CONFIG: dict = {
             "Mercedes AMG Petronas",
         ],
         "cars": {
+            2025: "/assets/static/images/2025/cars_drawing/mercedes.png",
             2026: "/assets/static/images/2026/cars_drawing/mercedes.png",
         },
         "logos": {},
@@ -113,6 +117,7 @@ TEAM_CONFIG: dict = {
             "Aston Martin Aramco", "Aston Martin Aramco F1 Team",
         ],
         "cars": {
+            2025: "/assets/static/images/2025/cars_drawing/aston_martin.png",
             2026: "/assets/static/images/2026/cars_drawing/aston_martin.png",
         },
         "logos": {},
@@ -132,6 +137,7 @@ TEAM_CONFIG: dict = {
             "Alpine", "BWT Alpine F1 Team", "Alpine F1 Team",
         ],
         "cars": {
+            2025: "/assets/static/images/2025/cars_drawing/alpine.png",
             2026: "/assets/static/images/2026/cars_drawing/alpine.png",
         },
         "logos": {},
@@ -151,6 +157,7 @@ TEAM_CONFIG: dict = {
             "Williams", "Williams Racing",
         ],
         "cars": {
+            2025: "/assets/static/images/2025/cars_drawing/williams.png",
             2026: "/assets/static/images/2026/cars_drawing/williams.png",
         },
         "logos": {},
@@ -172,6 +179,7 @@ TEAM_CONFIG: dict = {
             "Scuderia AlphaTauri Honda",
         ],
         "cars": {
+            2025: "/assets/static/images/2025/cars_drawing/racing_bulls.png",
             2026: "/assets/static/images/2026/cars_drawing/racing_bulls.png",
         },
         "logos": {},
@@ -191,6 +199,7 @@ TEAM_CONFIG: dict = {
             "Haas", "Haas F1 Team", "MoneyGram Haas F1 Team",
         ],
         "cars": {
+            2025: "/assets/static/images/2025/cars_drawing/haas.png",
             2026: "/assets/static/images/2026/cars_drawing/haas.png",
         },
         "logos": {},
@@ -212,6 +221,7 @@ TEAM_CONFIG: dict = {
             "Alfa Romeo", "Alfa Romeo Racing",
         ],
         "cars": {
+            2025: "/assets/static/images/2025/cars_drawing/audi.png",
             2026: "/assets/static/images/2026/cars_drawing/audi.png",
         },
         "logos": {},
@@ -232,6 +242,7 @@ TEAM_CONFIG: dict = {
             "Andretti Global",
         ],
         "cars": {
+            2025: "/assets/static/images/2025/cars_drawing/cadillac.png",
             2026: "/assets/static/images/2026/cars_drawing/cadillac.png",
         },
         "logos": {},

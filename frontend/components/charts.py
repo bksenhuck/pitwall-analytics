@@ -756,7 +756,8 @@ def qualifying_elimination_chart(laps: pd.DataFrame, season: int) -> go.Figure:
         y_final = y_coords[phase] + row["Y_Offset"]
 
         img_name = team_to_img.get(team, "general")
-        img_path = f"/assets/static/images/{season}/cars_drawing/{img_name}.png"
+        _img_season = season if season in (2025, 2026) else 2025
+        img_path = f"/assets/static/images/{_img_season}/cars_drawing/{img_name}.png"
         
         # Cálculo da posição X no modo "paper" (0 a 1) para manter tamanho FIXO da imagem
         x_paper = (time - x_range_min) / (x_range_max - x_range_min) if (x_range_max - x_range_min) > 0 else 0

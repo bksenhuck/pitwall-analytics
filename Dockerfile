@@ -29,6 +29,8 @@ RUN python -m pip install --upgrade pip \
 COPY backend /app/backend
 COPY frontend /app/frontend
 COPY assets /app/assets
+COPY ml /app/ml
+COPY models /app/models
 COPY main.py /app/main.py
 COPY startup.sh /app/startup.sh
 

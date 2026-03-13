@@ -6,7 +6,7 @@ Season discovery is done by scanning the data/ directory for
 pitwall_{year}.db files.
 """
 import os
-import pandas as pd
+import pyarrow.parquet as pq
 from typing import Optional, List, Dict, Any
 
 from backend.db.session import get_db_connection, get_available_season_dbs
@@ -21,6 +21,7 @@ class DataRepository:
     LAPS_DATA_DIR = os.path.join("data", "laps")
     WEATHER_DATA_DIR = os.path.join("data", "weather")
     RESULTS_DATA_DIR = os.path.join("data", "results")
+    PREDICTIONS_DATA_DIR = os.path.join("data", "predictions")
 
     # ===== SEASON METHODS =====
 
@@ -201,14 +202,18 @@ class DataRepository:
         )
         if os.path.exists(parquet_path):
             try:
-                df = pd.read_parquet(parquet_path)
-                df = df[df["session_id"] == session_id]
                 if driver_filter:
-                    mask = (
-                        (df["driver_code"] == driver_filter)
-                        | (df["driver_number"] == str(driver_filter))
-                    )
-                    df = df[mask]
+                    filters = [
+                        [("session_id", "=", session_id),
+                         ("driver_code", "=", driver_filter)],
+                        [("session_id", "=", session_id),
+                         ("driver_number", "=", str(driver_filter))],
+                    ]
+                else:
+                    filters = [("session_id", "=", session_id)]
+                df = pq.read_table(
+                    parquet_path, filters=filters
+                ).to_pandas()
                 return df.to_dict(orient="records")
             except Exception as e:
                 print(f"Error reading Laps Parquet for event {event_id}: {e}")
@@ -267,9 +272,10 @@ class DataRepository:
         )
         if os.path.exists(parquet_path):
             try:
-                df = pd.read_parquet(parquet_path)
-                if "lap_id" in df.columns:
-                    return df[df["lap_id"] == lap_id].to_dict(orient="records")
+                df = pq.read_table(
+                    parquet_path, filters=[("lap_id", "=", lap_id)]
+                ).to_pandas()
+                return df.to_dict(orient="records")
             except Exception as e:
                 print(f"Error reading Telemetry Parquet for lap {lap_id}: {e}")
 
@@ -318,8 +324,10 @@ class DataRepository:
         )
         if os.path.exists(parquet_path):
             try:
-                df = pd.read_parquet(parquet_path)
-                df = df[df["session_id"] == session_id]
+                df = pq.read_table(
+                    parquet_path,
+                    filters=[("session_id", "=", session_id)],
+                ).to_pandas()
                 return df.to_dict(orient="records")
             except Exception as e:
                 print(
@@ -358,8 +366,10 @@ class DataRepository:
         )
         if os.path.exists(parquet_path):
             try:
-                df = pd.read_parquet(parquet_path)
-                df = df[df["session_id"] == session_id]
+                df = pq.read_table(
+                    parquet_path,
+                    filters=[("session_id", "=", session_id)],
+                ).to_pandas()
                 return df.to_dict(orient="records")
             except Exception as e:
                 print(
@@ -371,6 +381,34 @@ class DataRepository:
             WHERE session_id = ?
             ORDER BY time_seconds
         """, (session_id,))
+
+    # ===== PREDICTIONS METHODS =====
+
+    @staticmethod
+    def get_predictions_for_event(
+        season: int, event_id: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Get pre-computed ML predictions for a race event.
+        Returns empty list if no parquet exists (not yet generated).
+        """
+        parquet_path = os.path.join(
+            DataRepository.PREDICTIONS_DATA_DIR,
+            str(season),
+            f"event_{event_id}.parquet",
+        )
+        if not os.path.exists(parquet_path):
+            return []
+        try:
+            return pq.read_table(parquet_path).to_pandas().to_dict(
+                orient="records"
+            )
+        except Exception as e:
+            print(
+                f"Error reading Predictions Parquet for event"
+                f" {event_id}: {e}"
+            )
+            return []
 
     # ===== RACE CONTROL METHODS =====
 

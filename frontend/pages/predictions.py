@@ -110,10 +110,7 @@ def load_predictions(n_clicks, season, event_name):
             style={"color": _MUTED, "padding": "1rem"},
         )
     try:
-        from ml.predict import generate_predictions
-        df = generate_predictions(season=int(season), event_name=event_name)
-    except FileNotFoundError:
-        return _model_not_trained_message()
+        df = client.get_predictions(season=int(season), event_name=event_name)
     except Exception as e:
         return html.Div(
             f"Erro ao carregar predições: {e}",

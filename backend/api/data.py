@@ -287,6 +287,31 @@ async def get_telemetry(
         raise HTTPException(status_code=status_code, detail=detail)
 
 
+@router.get('/data/predictions')
+@limiter.limit(RATE_LIMIT_LIGHT)
+async def get_predictions(
+    request: Request,
+    season: int = Query(..., description="Season year"),
+    event: str = Query(..., description="Event name", max_length=100),
+) -> List[Dict[str, Any]]:
+    """Pre-computed ML predictions for a race event."""
+    from backend.repositories.data_repository import DataRepository
+    repo = DataRepository()
+    event_row = repo.get_event_by_name(season, event)
+    if not event_row:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Event '{event}' not found for season {season}",
+        )
+    predictions = repo.get_predictions_for_event(season, event_row["id"])
+    if not predictions:
+        raise HTTPException(
+            status_code=404,
+            detail="Predictions not yet generated. Run scripts/generate_all_predictions.py",
+        )
+    return predictions
+
+
 @router.get('/data/sessions/{season}/{event}')
 @limiter.limit(RATE_LIMIT_LIGHT)
 async def get_available_sessions(

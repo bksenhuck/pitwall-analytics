@@ -76,8 +76,7 @@ def deploy(tag: str = "latest") -> bool:
         "--cpu=4",
         "--timeout=300s",
         "--min-instances=1",
-        "--ephemeral-storage=32Gi",  # necessario para DBs grandes (5-8GB cada)
-        "--startup-cpu-boost",       # CPU extra durante startup para download mais rapido
+        "--cpu-boost",               # CPU extra durante startup para download mais rapido
     ]
     print(f"[DEPLOY] Executando: {' '.join(cmd)}")
     result = subprocess.run(cmd, shell=True)

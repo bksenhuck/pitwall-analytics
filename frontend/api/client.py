@@ -221,6 +221,25 @@ def load_session(
         return pd.DataFrame(), pd.DataFrame(), {"error": str(e)}
 
 
+def get_predictions(season: int, event_name: str) -> pd.DataFrame:
+    """Load pre-computed ML predictions for a race event."""
+    if not _check_backend_available():
+        return pd.DataFrame()
+    try:
+        r = requests.get(
+            f"{BACKEND_API_URL}/data/predictions",
+            params={"season": season, "event": event_name},
+            timeout=10,
+        )
+        if r.status_code == 404:
+            return pd.DataFrame()
+        r.raise_for_status()
+        return pd.DataFrame(r.json())
+    except Exception as e:
+        print(f"❌ Error loading predictions for {event_name}: {e}")
+        return pd.DataFrame()
+
+
 def load_race_session(
     season: int,
     event_name: str,

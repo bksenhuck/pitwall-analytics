@@ -146,6 +146,30 @@ def upload_all() -> bool:
     return all(results)
 
 
+def upload_parquet_dir(subdir: str) -> int:
+    """Upload all parquet files under data/{subdir}/ preserving structure.
+
+    Returns number of files uploaded.
+    """
+    local_base = basedir / DB_DIR / subdir
+    if not local_base.exists():
+        print(f"[PARQUET] {subdir}/ nao encontrado, pulando")
+        return 0
+    parquets = sorted(local_base.rglob("*.parquet"))
+    if not parquets:
+        print(f"[PARQUET] Nenhum .parquet em {subdir}/")
+        return 0
+    print(f"[PARQUET] Enviando {len(parquets)} arquivo(s) de {subdir}/...")
+    for p in parquets:
+        blob_name = str(p.relative_to(basedir / DB_DIR)).replace("\\", "/")
+        size_mb = p.stat().st_size / (1024 * 1024)
+        print(f"  {blob_name} ({size_mb:.2f} MB)")
+        client = _get_client()
+        bucket = client.bucket(GCS_BUCKET_NAME)
+        bucket.blob(blob_name).upload_from_filename(str(p))
+    return len(parquets)
+
+
 # ---------------------------------------------------------------------------
 # Deploy Cloud Run
 # ---------------------------------------------------------------------------
@@ -196,6 +220,8 @@ def main():
         ok = upload_season(args.season)
     else:
         ok = upload_all()
+
+    upload_parquet_dir("predictions")
 
     if not ok:
         print("Upload falhou")
